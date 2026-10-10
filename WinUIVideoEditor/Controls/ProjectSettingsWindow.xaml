@@ -1,0 +1,72 @@
+<Window
+    x:Class="WinUIVideoEditor.Controls.ProjectSettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="#1A1A22">
+        <Grid.RowDefinitions>
+            <!-- Title Bar / Header -->
+            <RowDefinition Height="Auto"/>
+            <!-- Content -->
+            <RowDefinition Height="*"/>
+            <!-- Action Buttons Footer -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#22222C" Padding="20,14" BorderBrush="#2C2C38" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE713;" Foreground="#4CC2FF" FontSize="18"/>
+                <TextBlock Text="工程与引擎设置" FontSize="16" FontWeight="Bold" Foreground="#FFFFFF"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Body -->
+        <ScrollViewer Grid.Row="1" Padding="20,16" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12">
+                <Border Background="#22222C" CornerRadius="6" Padding="14,10">
+                    <Grid>
+                        <TextBlock Text="渲染架构" Foreground="#888899" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="Direct3D 11 + Google Skia 零拷贝渲染管线" Foreground="#E0E0E0" FontSize="12" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="#22222C" CornerRadius="6" Padding="14,10">
+                    <Grid>
+                        <TextBlock Text="硬件解码" Foreground="#888899" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="FFmpeg D3D11VA 硬解 (NV12 -> RGBA8)" Foreground="#E0E0E0" FontSize="12" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="#22222C" CornerRadius="6" Padding="14,10">
+                    <Grid>
+                        <TextBlock Text="硬件编码" Foreground="#888899" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock Text="显存直通硬件编码 (NVENC / AMF / QSV)" Foreground="#E0E0E0" FontSize="12" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="#22222C" CornerRadius="6" Padding="14,10">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="当前视频" Foreground="#888899" FontSize="12"/>
+                        <TextBlock x:Name="TxtMediaPath" Text="未加载视频" Foreground="#4CC2FF" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="#22222C" CornerRadius="6" Padding="14,10">
+                    <Grid>
+                        <TextBlock Text="时间线总时长" Foreground="#888899" FontSize="12" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="TxtDuration" Text="00:00:00:00" Foreground="#E0E0E0" FontSize="12" HorizontalAlignment="Right" FontWeight="Bold"/>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Actions -->
+        <Border Grid.Row="2" Background="#202028" Padding="20,12" BorderBrush="#2C2C38" BorderThickness="0,1,0,0">
+            <Button Content="确定" Style="{StaticResource AccentButtonStyle}" Width="90" HorizontalAlignment="Right" Click="OnCloseClicked"/>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "WinUIVideoEditor (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "WinUIVideoEditor (Unpackaged)": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

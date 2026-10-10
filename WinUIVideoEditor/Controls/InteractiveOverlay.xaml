@@ -1,0 +1,50 @@
+<UserControl
+    x:Class="WinUIVideoEditor.Controls.InteractiveOverlay"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="Transparent">
+
+    <Canvas x:Name="OverlayCanvas" Background="Transparent" PointerPressed="OnCanvasPointerPressed">
+        <!-- Interactive Bounding Box for Selected Element -->
+        <Canvas x:Name="BoundingBoxContainer" Visibility="Collapsed">
+            <!-- Main Outline Box -->
+            <Border x:Name="SelectionBox"
+                    BorderBrush="#0078D4"
+                    BorderThickness="1.5"
+                    Background="#100078D4"
+                    CornerRadius="3"
+                    PointerPressed="OnBoxPointerPressed"
+                    PointerMoved="OnBoxPointerMoved"
+                    PointerReleased="OnBoxPointerReleased"/>
+
+            <!-- 8 Handles for resizing and transformation -->
+            <!-- Top Left -->
+            <Rectangle x:Name="HandleNW" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="NW" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Top Right -->
+            <Rectangle x:Name="HandleNE" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="NE" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Bottom Left -->
+            <Rectangle x:Name="HandleSW" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="SW" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Bottom Right -->
+            <Rectangle x:Name="HandleSE" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="SE" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Mid Top -->
+            <Rectangle x:Name="HandleN" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="N" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Mid Bottom -->
+            <Rectangle x:Name="HandleS" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="S" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Mid Left -->
+            <Rectangle x:Name="HandleW" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="W" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+            <!-- Mid Right -->
+            <Rectangle x:Name="HandleE" Width="10" Height="10" Fill="White" Stroke="#0078D4" StrokeThickness="1.5"
+                       Tag="E" PointerPressed="OnHandlePointerPressed" PointerMoved="OnHandlePointerMoved" PointerReleased="OnHandlePointerReleased"/>
+        </Canvas>
+    </Canvas>
+</UserControl>

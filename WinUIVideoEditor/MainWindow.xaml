@@ -1,0 +1,239 @@
+<Window
+    x:Class="WinUIVideoEditor.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:controls="using:WinUIVideoEditor.Controls"
+    mc:Ignorable="d"
+    Title="WinUI 视频剪辑器 - D3D11零拷贝渲染引擎">
+
+    <Grid Background="#121216">
+        <Grid.RowDefinitions>
+            <!-- Row 0: Top Bar -->
+            <RowDefinition Height="52"/>
+            <!-- Row 1: Workspace (Left Pane + Preview + Timeline) -->
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top Bar Header -->
+        <Border Grid.Row="0" Background="#1A1A20" BorderBrush="#282832" BorderThickness="0,0,0,1">
+            <Grid Padding="16,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: App Logo & Title -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                    <Border Width="32" Height="32" CornerRadius="6" Background="#0078D4">
+                        <FontIcon Glyph="&#xE714;" Foreground="White" FontSize="16"/>
+                    </Border>
+                    <TextBlock Text="WinUI 视频剪辑器" FontWeight="Bold" FontSize="15" VerticalAlignment="Center" Foreground="#F0F0F0"/>
+                </StackPanel>
+
+                <!-- Center: Playback Controls & Time Display -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                    <Button Click="OnOpenMediaClicked" ToolTipService.ToolTip="导入视频媒体文件">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xED25;" FontSize="14"/>
+                            <TextBlock Text="打开视频"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Click="OnPreviousFrameClicked" Width="36" Height="36" Padding="0" ToolTipService.ToolTip="上一帧 (跳退)">
+                        <FontIcon Glyph="&#xE892;" FontSize="12"/>
+                    </Button>
+
+                    <Button x:Name="BtnPlayPause" Click="OnPlayPauseClicked" Width="42" Height="42" Padding="0"
+                            Style="{StaticResource AccentButtonStyle}" ToolTipService.ToolTip="播放 / 暂停 (空格键)">
+                        <FontIcon x:Name="IconPlayPause" Glyph="&#xE768;" FontSize="16"/>
+                    </Button>
+
+                    <Button Click="OnNextFrameClicked" Width="36" Height="36" Padding="0" ToolTipService.ToolTip="下一帧 (快进)">
+                        <FontIcon Glyph="&#xE893;" FontSize="12"/>
+                    </Button>
+
+                    <!-- Timecode Readout -->
+                    <Border Background="#202028" CornerRadius="4" Padding="12,6" Margin="8,0,0,0" BorderBrush="#2E2E3C" BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock x:Name="TxtCurrentTime" Text="00:00:00:00" FontFamily="Consolas" FontSize="13" FontWeight="Bold" Foreground="#4CC2FF"/>
+                            <TextBlock Text="/" Foreground="#666677" FontSize="13"/>
+                            <TextBlock x:Name="TxtTotalDuration" Text="00:00:30:00" FontFamily="Consolas" FontSize="13" Foreground="#9999AA"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Right: Action Buttons -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                    <Button Click="OnProjectSettingsClicked" ToolTipService.ToolTip="工程信息">
+                        <FontIcon Glyph="&#xE713;" FontSize="14"/>
+                    </Button>
+
+                    <!-- Prominent Export Accent Button -->
+                    <Button Click="OnExportVideoClicked" Style="{StaticResource AccentButtonStyle}" Padding="16,6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xEDE1;" FontSize="14"/>
+                            <TextBlock Text="导出视频" FontWeight="Bold"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Workspace Grid -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <!-- Left Pane: 1/6 (16.6%), Min 200px -->
+                <ColumnDefinition Width="280" MinWidth="200"/>
+                <!-- Splitter -->
+                <ColumnDefinition Width="5"/>
+                <!-- Right Area (Preview + Timeline) -->
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- LEFT PANE: Text, Shape and Property Toolbox -->
+            <Border Grid.Column="0" Background="#16161B" BorderBrush="#252530" BorderThickness="0,0,1,0">
+                <TabView x:Name="LeftToolboxTab" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent" Margin="0,4,0,0">
+                    <!-- Tab 1: 文本工具箱 -->
+                    <TabViewItem Header="文本字幕" IsClosable="False">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
+                            <StackPanel Spacing="16">
+                                <Button Content="+ 添加文本字幕" Click="OnAddTextClicked" HorizontalAlignment="Stretch"
+                                        Style="{StaticResource AccentButtonStyle}" Height="38"/>
+
+                                <TextBlock Text="文本属性" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="字幕内容" FontSize="12" Foreground="#AAAAAA"/>
+                                    <TextBox x:Name="TbTextContent" TextWrapping="Wrap" AcceptsReturn="True" Height="70"
+                                             PlaceholderText="输入字幕文字..." TextChanged="OnTextContentChanged"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="字体族 (DirectWrite)" FontSize="12" Foreground="#AAAAAA"/>
+                                    <ComboBox x:Name="CmbFontFamily" HorizontalAlignment="Stretch" SelectionChanged="OnFontFamilyChanged"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <Grid>
+                                        <TextBlock Text="字体大小" FontSize="12" Foreground="#AAAAAA"/>
+                                        <TextBlock x:Name="TxtFontSize" Text="36" FontSize="12" HorizontalAlignment="Right" Foreground="#4CC2FF"/>
+                                    </Grid>
+                                    <Slider x:Name="SliderFontSize" Minimum="12" Maximum="120" Value="36" ValueChanged="OnFontSizeChanged"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="字体填充颜色" FontSize="12" Foreground="#AAAAAA"/>
+                                    <ColorPicker x:Name="ColorPickerFill" ColorChanged="OnFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="描边边框颜色" FontSize="12" Foreground="#AAAAAA"/>
+                                    <ColorPicker x:Name="ColorPickerStroke" ColorChanged="OnStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <Grid>
+                                        <TextBlock Text="描边粗细" FontSize="12" Foreground="#AAAAAA"/>
+                                        <TextBlock x:Name="TxtStrokeWidth" Text="2" FontSize="12" HorizontalAlignment="Right" Foreground="#4CC2FF"/>
+                                    </Grid>
+                                    <Slider x:Name="SliderStrokeWidth" Minimum="0" Maximum="12" Value="2" ValueChanged="OnStrokeWidthChanged"/>
+                                </StackPanel>
+
+                                <Button Content="删除当前字幕" Click="OnDeleteElementClicked" HorizontalAlignment="Stretch"
+                                        Background="#442222" Foreground="#FF6666" Margin="0,12,0,0"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabViewItem>
+
+                    <!-- Tab 2: 图形工具箱 -->
+                    <TabViewItem Header="矢量图形" IsClosable="False">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
+                            <StackPanel Spacing="16">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Grid.Column="0" Content="+ 矩形" Click="OnAddRectangleClicked" HorizontalAlignment="Stretch" Height="36"/>
+                                    <Button Grid.Column="1" Content="+ 圆形" Click="OnAddCircleClicked" HorizontalAlignment="Stretch" Height="36"/>
+                                </Grid>
+
+                                <TextBlock Text="图形属性" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="填充颜色" FontSize="12" Foreground="#AAAAAA"/>
+                                    <ColorPicker x:Name="ShapeColorPickerFill" ColorChanged="OnShapeFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="边框描边颜色" FontSize="12" Foreground="#AAAAAA"/>
+                                    <ColorPicker x:Name="ShapeColorPickerStroke" ColorChanged="OnShapeStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6">
+                                    <Grid>
+                                        <TextBlock Text="描边粗细" FontSize="12" Foreground="#AAAAAA"/>
+                                        <TextBlock x:Name="TxtShapeStrokeWidth" Text="2" FontSize="12" HorizontalAlignment="Right" Foreground="#4CC2FF"/>
+                                    </Grid>
+                                    <Slider x:Name="SliderShapeStrokeWidth" Minimum="0" Maximum="16" Value="2" ValueChanged="OnShapeStrokeWidthChanged"/>
+                                </StackPanel>
+
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="宽度 (W)" FontSize="12" Foreground="#AAAAAA"/>
+                                        <NumberBox x:Name="NbShapeWidth" Value="280" ValueChanged="OnShapeDimensionChanged" SpinButtonPlacementMode="Compact"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="高度 (H)" FontSize="12" Foreground="#AAAAAA"/>
+                                        <NumberBox x:Name="NbShapeHeight" Value="160" ValueChanged="OnShapeDimensionChanged" SpinButtonPlacementMode="Compact"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Button Content="删除当前图形" Click="OnDeleteElementClicked" HorizontalAlignment="Stretch"
+                                        Background="#442222" Foreground="#FF6666" Margin="0,12,0,0"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabViewItem>
+
+                </TabView>
+            </Border>
+
+            <!-- Vertical Splitter between Left and Right -->
+            <Border Grid.Column="1" Background="#22222A"/>
+
+            <!-- RIGHT AREA: Canvas Viewport + Timeline Area -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <!-- Preview Area: Top -->
+                    <RowDefinition Height="3*"/>
+                    <!-- Horizontal Splitter -->
+                    <RowDefinition Height="5"/>
+                    <!-- Timeline Area: Bottom: 1/4 (25%), Min 180px -->
+                    <RowDefinition Height="*" MinHeight="180"/>
+                </Grid.RowDefinitions>
+
+                <!-- PREVIEW CANVAS HOST -->
+                <Grid Grid.Row="0" x:Name="PreviewContainer" Background="#0C0C0E">
+                    <!-- Native Win32 / Direct3D 11 Viewport Child Window -->
+                    <controls:ViewportHost x:Name="NativeViewport"/>
+
+                    <!-- Interactive Bounding Box and Resize Handles Overlay -->
+                    <controls:InteractiveOverlay x:Name="ViewportOverlay"/>
+                </Grid>
+
+                <!-- Horizontal Splitter between Preview and Timeline -->
+                <Border Grid.Row="1" Background="#22222A"/>
+
+                <!-- TIMELINE PANE -->
+                <controls:TimelineControl Grid.Row="2" x:Name="TimelineView"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

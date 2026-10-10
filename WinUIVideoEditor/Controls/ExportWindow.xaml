@@ -1,0 +1,132 @@
+<Window
+    x:Class="WinUIVideoEditor.Controls.ExportWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="#1A1A22">
+        <Grid.RowDefinitions>
+            <!-- Title Bar / Header -->
+            <RowDefinition Height="Auto"/>
+            <!-- Content -->
+            <RowDefinition Height="*"/>
+            <!-- Action Buttons Footer -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="#22222C" Padding="20,14" BorderBrush="#2C2C38" BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xEDE1;" Foreground="#4CC2FF" FontSize="18"/>
+                <TextBlock Text="导出视频" FontSize="16" FontWeight="Bold" Foreground="#FFFFFF"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Main Body -->
+        <ScrollViewer Grid.Row="1" Padding="20,16" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="16">
+                <!-- Configuration Section -->
+                <StackPanel x:Name="ConfigSection" Spacing="14">
+                    <!-- Output Path Picker -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="输出路径" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="TbOutputPath" PlaceholderText="请选择导出 MP4 视频保存路径" IsReadOnly="True"/>
+                            <Button Grid.Column="1" Content="浏览..." Click="OnBrowseOutputClicked"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Resolution Preset -->
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="分辨率预设" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                        <ComboBox x:Name="CmbResolution" HorizontalAlignment="Stretch" SelectedIndex="1">
+                            <ComboBoxItem Content="原始源分辨率" Tag="0x0"/>
+                            <ComboBoxItem Content="1080P Full HD (1920 × 1080)" Tag="1920x1080"/>
+                            <ComboBoxItem Content="4K Ultra HD (3840 × 2160)" Tag="3840x2160"/>
+                            <ComboBoxItem Content="720P HD (1280 × 720)" Tag="1280x720"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <!-- Target Framerate & Hardware Encoder -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Spacing="6">
+                            <TextBlock Text="目标帧率 (FPS)" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                            <ComboBox x:Name="CmbFps" HorizontalAlignment="Stretch" SelectedIndex="0">
+                                <ComboBoxItem Content="30 fps (推荐)" Tag="30"/>
+                                <ComboBoxItem Content="60 fps (流畅)" Tag="60"/>
+                                <ComboBoxItem Content="24 fps (电影)" Tag="24"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="硬件加速编码器" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                            <ComboBox x:Name="CmbEncoder" HorizontalAlignment="Stretch" SelectedIndex="0">
+                                <ComboBoxItem Content="自动匹配 (Auto)" Tag="0"/>
+                                <ComboBoxItem Content="AMD AMF 硬件加速" Tag="2"/>
+                                <ComboBoxItem Content="NVIDIA NVENC 硬件加速" Tag="1"/>
+                                <ComboBoxItem Content="Intel QSV 硬件加速" Tag="3"/>
+                                <ComboBoxItem Content="CPU 软件编码回退 (x264)" Tag="9"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Bitrate Mode & Value -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Spacing="6">
+                            <TextBlock Text="码率模式" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                            <ComboBox x:Name="CmbBitrateMode" HorizontalAlignment="Stretch" SelectedIndex="0">
+                                <ComboBoxItem Content="VBR (动态码率)"/>
+                                <ComboBoxItem Content="CBR (固定码率)"/>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="目标码率" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
+                            <ComboBox x:Name="CmbBitrate" HorizontalAlignment="Stretch" SelectedIndex="1">
+                                <ComboBoxItem Content="5 Mbps (标清)" Tag="5000000"/>
+                                <ComboBoxItem Content="10 Mbps (高清推荐)" Tag="10000000"/>
+                                <ComboBoxItem Content="20 Mbps (超清)" Tag="20000000"/>
+                                <ComboBoxItem Content="40 Mbps (4K原画)" Tag="40000000"/>
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Progress Section (Hidden during config) -->
+                <StackPanel x:Name="ProgressSection" Spacing="12" Visibility="Collapsed">
+                    <TextBlock x:Name="TxtExportStatus" Text="正在进行 GPU 显存直通硬件编码..." FontWeight="SemiBold" FontSize="14" Foreground="#4CC2FF"/>
+                    <ProgressBar x:Name="PbExport" Minimum="0" Maximum="100" Value="0" Height="8"/>
+                    <Grid>
+                        <TextBlock x:Name="TxtProgressPercent" Text="0.0%" FontSize="12" Foreground="#AAAAAA"/>
+                        <TextBlock x:Name="TxtEta" Text="估算剩余时间: 计算中..." HorizontalAlignment="Right" FontSize="12" Foreground="#888888"/>
+                    </Grid>
+                    <Button x:Name="BtnCancelExport" Content="中止导出" HorizontalAlignment="Right" Click="OnCancelExportClicked" Margin="0,8,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Actions -->
+        <Border Grid.Row="2" Background="#202028" Padding="20,12" BorderBrush="#2C2C38" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="12">
+                <Button x:Name="BtnClose" Content="取消" Width="90" Click="OnCloseClicked"/>
+                <Button x:Name="BtnStartExport" Content="开始导出" Style="{StaticResource AccentButtonStyle}" Width="100" Click="OnStartExportClicked"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
