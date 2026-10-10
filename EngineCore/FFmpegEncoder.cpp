@@ -59,9 +59,12 @@ bool FFmpegEncoder::StartExport(
     VideoColorConverter* colorConverter,
     SkiaRenderer* skiaRenderer,
     FFmpegDecoder* decoder,
+    const std::vector<VideoClipDesc>& videoClips,
     const std::vector<PrimitiveElementDesc>& elements,
     const ExportConfig& config,
-    ExportProgressCallback callback)
+    ExportProgressCallback callback,
+    int previewWidth,
+    int previewHeight)
 {
     if (m_isExporting.load())
     {
@@ -83,9 +86,12 @@ bool FFmpegEncoder::StartExport(
         colorConverter,
         skiaRenderer,
         decoder,
+        videoClips,
         elements,
         config,
-        callback);
+        callback,
+        previewWidth,
+        previewHeight);
 
     return true;
 }
@@ -95,9 +101,12 @@ void FFmpegEncoder::ExportWorker(
     VideoColorConverter* colorConverter,
     SkiaRenderer* skiaRenderer,
     FFmpegDecoder* decoder,
+    std::vector<VideoClipDesc> videoClips,
     std::vector<PrimitiveElementDesc> elements,
     ExportConfig config,
-    ExportProgressCallback callback)
+    ExportProgressCallback callback,
+    int previewWidth,
+    int previewHeight)
 {
     int width = config.Width > 0 ? config.Width : (decoder && decoder->GetWidth() > 0 ? decoder->GetWidth() : 1920);
     int height = config.Height > 0 ? config.Height : (decoder && decoder->GetHeight() > 0 ? decoder->GetHeight() : 1080);
@@ -108,9 +117,100 @@ void FFmpegEncoder::ExportWorker(
     int fps = config.Fps > 0 ? config.Fps : 30;
     int bitrate = config.Bitrate > 0 ? config.Bitrate : 8000000;
 
-    int64_t totalDurationMs = (decoder && decoder->GetDurationMs() > 0) ? decoder->GetDurationMs() : 10000;
+    int64_t totalDurationMs = 0;
+    if (!videoClips.empty())
+    {
+        for (const auto& c : videoClips)
+        {
+            totalDurationMs = (std::max)(totalDurationMs, c.StartTimeMs + c.DurationMs);
+        }
+    }
+    if (totalDurationMs <= 0 && decoder && decoder->GetDurationMs() > 0)
+    {
+        totalDurationMs = decoder->GetDurationMs();
+    }
+    if (totalDurationMs <= 0) totalDurationMs = 10000;
+
     int64_t totalFrames = (totalDurationMs * fps) / 1000;
     if (totalFrames <= 0) totalFrames = 1;
+
+    // Calculate aspect-ratio fit to accurately scale Skia elements without any Y-axis distortion
+    int vidW = width;
+    int vidH = height;
+    if (decoder && decoder->GetWidth() > 0 && decoder->GetHeight() > 0)
+    {
+        vidW = decoder->GetWidth();
+        vidH = decoder->GetHeight();
+    }
+
+    int prevW = previewWidth > 0 ? previewWidth : width;
+    int prevH = previewHeight > 0 ? previewHeight : height;
+
+    double srcAspect = static_cast<double>(vidW) / static_cast<double>(vidH);
+    double prevAspect = static_cast<double>(prevW) / static_cast<double>(prevH);
+
+    int prevFitW = prevW;
+    int prevFitH = prevH;
+    int prevOffsetX = 0;
+    int prevOffsetY = 0;
+
+    if (srcAspect > prevAspect)
+    {
+        prevFitW = prevW;
+        prevFitH = (std::max)(1, static_cast<int>(std::round(prevW / srcAspect)));
+        prevOffsetY = (prevH - prevFitH) / 2;
+    }
+    else
+    {
+        prevFitH = prevH;
+        prevFitW = (std::max)(1, static_cast<int>(std::round(prevH * srcAspect)));
+        prevOffsetX = (prevW - prevFitW) / 2;
+    }
+
+    double expAspect = static_cast<double>(width) / static_cast<double>(height);
+    int expFitW = width;
+    int expFitH = height;
+    int expOffsetX = 0;
+    int expOffsetY = 0;
+
+    if (srcAspect > expAspect)
+    {
+        expFitW = width;
+        expFitH = (std::max)(1, static_cast<int>(std::round(width / srcAspect)));
+        expOffsetY = (height - expFitH) / 2;
+    }
+    else
+    {
+        expFitH = height;
+        expFitW = (std::max)(1, static_cast<int>(std::round(height * srcAspect)));
+        expOffsetX = (width - expFitW) / 2;
+    }
+
+    std::vector<PrimitiveElementDesc> scaledElements;
+    for (const auto& el : elements)
+    {
+        PrimitiveElementDesc s = el;
+        s.IsSelected = 0; // Never render selection handles during export
+        float normX = (el.X - prevOffsetX) / static_cast<float>(prevFitW);
+        float normY = (el.Y - prevOffsetY) / static_cast<float>(prevFitH);
+        float normW = el.Width / static_cast<float>(prevFitW);
+        float normH = el.Height / static_cast<float>(prevFitH);
+
+        s.X = expOffsetX + normX * expFitW;
+        s.Y = expOffsetY + normY * expFitH;
+        s.Width = normW * expFitW;
+        s.Height = normH * expFitH;
+        float scale = static_cast<float>(expFitH) / static_cast<float>(prevFitH);
+        s.FontSize = el.FontSize * scale;
+        s.StrokeWidth = el.StrokeWidth * scale;
+        scaledElements.push_back(s);
+    }
+
+    // Resize Skia to full export resolution for clean vector rasterization
+    if (skiaRenderer)
+    {
+        skiaRenderer->Resize(width, height);
+    }
 
     // Convert output path to UTF-8
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, config.OutputPath, -1, nullptr, 0, nullptr, nullptr);
@@ -120,6 +220,7 @@ void FFmpegEncoder::ExportWorker(
     const AVCodec* encoder = SelectEncoder(config.HardwareEncoderType);
     if (!encoder)
     {
+        if (skiaRenderer) skiaRenderer->Resize(prevW, prevH);
         if (callback) callback(0.0f, true, -1);
         m_isExporting.store(false);
         return;
@@ -265,6 +366,18 @@ void FFmpegEncoder::ExportWorker(
     AVPacket* encPacket = av_packet_alloc();
     SwsContext* swsCtx = nullptr;
 
+    int currentClipIdx = -1;
+    if (!videoClips.empty())
+    {
+        decoder->OpenFile(videoClips[0].FilePath);
+        currentClipIdx = 0;
+        decoder->Seek(0);
+    }
+    else if (decoder && decoder->IsLoaded())
+    {
+        decoder->Seek(0);
+    }
+
     for (int64_t i = 0; i < totalFrames; ++i)
     {
         if (m_cancelRequested.load())
@@ -275,18 +388,67 @@ void FFmpegEncoder::ExportWorker(
         int64_t ptsMs = (i * 1000) / fps;
 
         // 1. Decode video frame at current timestamp
-        if (decoder && decoder->IsLoaded())
+        if (!videoClips.empty())
         {
-            decoder->Seek(ptsMs);
-            decoder->ReadAndRenderFrame(offscreenTarget.Get(), width, height);
+            int targetClip = -1;
+            for (size_t c = 0; c < videoClips.size(); ++c)
+            {
+                if (ptsMs >= videoClips[c].StartTimeMs &&
+                    ptsMs < (videoClips[c].StartTimeMs + videoClips[c].DurationMs))
+                {
+                    targetClip = static_cast<int>(c);
+                    break;
+                }
+            }
+
+            if (targetClip >= 0)
+            {
+                const auto& clip = videoClips[targetClip];
+                int64_t localPts = ptsMs - clip.StartTimeMs;
+
+                if (currentClipIdx != targetClip)
+                {
+                    decoder->OpenFile(clip.FilePath);
+                    currentClipIdx = targetClip;
+                    decoder->Seek(localPts);
+                }
+                else
+                {
+                    decoder->DecodeNextFrame(nullptr);
+                }
+
+                decoder->RenderCurrentFrame(offscreenTarget.Get(), width, height);
+            }
+            else
+            {
+                // Clear offscreenTarget with dark frame when outside clip ranges
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
+                if (SUCCEEDED(device->CreateRenderTargetView(offscreenTarget.Get(), nullptr, &rtv)))
+                {
+                    const float black[4] = { 0.07f, 0.07f, 0.08f, 1.0f };
+                    immediateCtx->ClearRenderTargetView(rtv.Get(), black);
+                }
+            }
+        }
+        else if (decoder && decoder->IsLoaded())
+        {
+            if (i == 0)
+            {
+                decoder->Seek(0);
+            }
+            else
+            {
+                decoder->DecodeNextFrame(nullptr);
+            }
+            decoder->RenderCurrentFrame(offscreenTarget.Get(), width, height);
         }
 
-        // 2. Skia 2D overlay rendering (Text & Shapes)
+        // 2. Skia 2D overlay rendering (Text & Shapes) with pre-scaled coordinates
         if (skiaRenderer && offscreenTarget)
         {
             if (skiaRenderer->BeginDraw(offscreenTarget.Get()))
             {
-                for (const auto& elem : elements)
+                for (const auto& elem : scaledElements)
                 {
                     if (ptsMs >= elem.StartTimeMs && ptsMs <= (elem.StartTimeMs + elem.DurationMs))
                     {
@@ -417,6 +579,11 @@ void FFmpegEncoder::ExportWorker(
     if (callback)
     {
         callback(cancelled ? 0.0f : 1.0f, true, cancelled ? -99 : 0);
+    }
+
+    if (skiaRenderer)
+    {
+        skiaRenderer->Resize(prevW, prevH);
     }
 
     m_isExporting.store(false);

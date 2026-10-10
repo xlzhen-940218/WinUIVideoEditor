@@ -44,9 +44,12 @@ public:
         VideoColorConverter* colorConverter,
         SkiaRenderer* skiaRenderer,
         FFmpegDecoder* decoder,
+        const std::vector<VideoClipDesc>& videoClips,
         const std::vector<PrimitiveElementDesc>& elements,
         const ExportConfig& config,
-        ExportProgressCallback callback);
+        ExportProgressCallback callback,
+        int previewWidth = 0,
+        int previewHeight = 0);
 
     void CancelExport();
     bool IsExporting() const { return m_isExporting.load(); }
@@ -57,9 +60,12 @@ private:
         VideoColorConverter* colorConverter,
         SkiaRenderer* skiaRenderer,
         FFmpegDecoder* decoder,
+        std::vector<VideoClipDesc> videoClips,
         std::vector<PrimitiveElementDesc> elements,
         ExportConfig config,
-        ExportProgressCallback callback);
+        ExportProgressCallback callback,
+        int previewWidth,
+        int previewHeight);
 
     const AVCodec* SelectEncoder(int hardwareEncoderType);
 

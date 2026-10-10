@@ -108,6 +108,16 @@ sk_rrect_t* sk_rrect_new(void);
 void sk_rrect_delete(sk_rrect_t* rrect);
 void sk_rrect_set_rect_xy(sk_rrect_t* rrect, const sk_rect_t* rect, float xRad, float yRad);
 
+// Paths
+typedef struct sk_path_t sk_path_t;
+sk_path_t* sk_path_new(void);
+void sk_path_delete(sk_path_t* path);
+void sk_path_move_to(sk_path_t* path, float x, float y);
+void sk_path_line_to(sk_path_t* path, float x, float y);
+void sk_path_cubic_to(sk_path_t* path, float x0, float y0, float x1, float y1, float x2, float y2);
+void sk_path_close(sk_path_t* path);
+void sk_canvas_draw_path(sk_canvas_t* canvas, const sk_path_t* path, const sk_paint_t* paint);
+
 // Paint
 sk_paint_t* sk_paint_new(void);
 void sk_paint_delete(sk_paint_t* paint);

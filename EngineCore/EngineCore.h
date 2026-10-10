@@ -49,6 +49,13 @@ struct ExportConfig
     int Bitrate;
     int HardwareEncoderType; // 0: Auto, 1: NVENC, 2: AMF, 3: QSV
 };
+
+struct VideoClipDesc
+{
+    wchar_t FilePath[260];
+    int64_t StartTimeMs;
+    int64_t DurationMs;
+};
 #pragma pack(pop)
 
 extern "C" {
@@ -60,11 +67,14 @@ extern "C" {
 
     // 2. 媒体流与播放控制
     ENGINE_API bool Engine_LoadMedia(void* engine, const wchar_t* filePath);
+    ENGINE_API void Engine_ClearVideoClips(void* engine);
+    ENGINE_API void Engine_AddVideoClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs);
     ENGINE_API void Engine_Seek(void* engine, int64_t timeStampMs);
     ENGINE_API void Engine_Play(void* engine);
     ENGINE_API void Engine_Pause(void* engine);
     ENGINE_API bool Engine_IsPlaying(void* engine);
     ENGINE_API int64_t Engine_GetDurationMs(void* engine);
+    ENGINE_API int64_t Engine_GetLoadedMediaDurationMs(void* engine);
     ENGINE_API int64_t Engine_GetCurrentPositionMs(void* engine);
     ENGINE_API void Engine_GetMediaDimensions(void* engine, int* width, int* height);
     ENGINE_API void Engine_RenderFrame(void* engine);

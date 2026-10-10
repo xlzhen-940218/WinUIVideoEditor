@@ -64,7 +64,7 @@ namespace WinUIVideoEditor.ViewModels
 
         public bool HasSelectedClip => _selectedClip != null;
         public bool IsTextSelected => _selectedClip?.ElementType == 0;
-        public bool IsShapeSelected => _selectedClip?.ElementType == 1 || _selectedClip?.ElementType == 2;
+        public bool IsShapeSelected => _selectedClip != null && _selectedClip.ElementType >= 1 && _selectedClip.ElementType <= 7;
 
         public bool IsPlaying
         {
@@ -156,48 +156,80 @@ namespace WinUIVideoEditor.ViewModels
             if (success)
             {
                 MediaFilePath = filePath;
-                long dur = NativeEngineApi.Engine_GetDurationMs(_engine);
-                if (dur > 0)
-                {
-                    _timeline.TotalDurationMs = dur;
-                }
+                long dur = NativeEngineApi.Engine_GetLoadedMediaDurationMs(_engine);
+                if (dur <= 0) dur = 10000;
 
-                // Add or update clip in Video track
                 var videoTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video);
                 if (videoTrack != null)
                 {
-                    videoTrack.Clips.Clear();
-                    var videoClip = new ClipModel
+                    if (videoTrack.Clips.Count == 0)
                     {
-                        Id = 9999,
-                        Title = System.IO.Path.GetFileName(filePath),
-                        TrackType = TrackType.Video,
-                        StartTimeMs = 0,
-                        DurationMs = _timeline.TotalDurationMs
-                    };
-                    videoTrack.Clips.Add(videoClip);
+                        var videoClip = new ClipModel
+                        {
+                            Id = _nextElementId++,
+                            Title = System.IO.Path.GetFileName(filePath),
+                            TrackType = TrackType.Video,
+                            StartTimeMs = 0,
+                            DurationMs = dur,
+                            ContentText = filePath
+                        };
+                        videoTrack.Clips.Add(videoClip);
+                        _timeline.TotalDurationMs = dur;
+                        _timeline.CurrentTimeMs = 0;
+                    }
+                    else
+                    {
+                        long startMs = _timeline.TotalDurationMs;
+                        var videoClip = new ClipModel
+                        {
+                            Id = _nextElementId++,
+                            Title = System.IO.Path.GetFileName(filePath),
+                            TrackType = TrackType.Video,
+                            StartTimeMs = startMs,
+                            DurationMs = dur,
+                            ContentText = filePath
+                        };
+                        videoTrack.Clips.Add(videoClip);
+                        _timeline.TotalDurationMs = startMs + dur;
+                    }
+
+                    SyncVideoClipsToEngine();
                 }
 
-                _timeline.CurrentTimeMs = 0;
+                // Show first frame immediately without having to click play
                 SeekTo(0);
+                NativeEngineApi.Engine_RenderFrame(_engine);
             }
             return success;
         }
 
+        public void SyncVideoClipsToEngine()
+        {
+            if (_engine == IntPtr.Zero) return;
+            NativeEngineApi.Engine_ClearVideoClips(_engine);
+            var videoTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video);
+            if (videoTrack != null)
+            {
+                foreach (var clip in videoTrack.Clips)
+                {
+                    NativeEngineApi.Engine_AddVideoClip(_engine, clip.ContentText, clip.StartTimeMs, clip.DurationMs);
+                }
+            }
+        }
+
         public void TogglePlayPause()
         {
+            if (!Timeline.CanPlay) return;
             if (IsPlaying) Pause();
             else Play();
         }
 
         public void Play()
         {
-            if (_engine != IntPtr.Zero)
-            {
-                NativeEngineApi.Engine_Play(_engine);
-                IsPlaying = true;
-                _playbackTimer?.Start();
-            }
+            if (!Timeline.CanPlay || _engine == IntPtr.Zero) return;
+            NativeEngineApi.Engine_Play(_engine);
+            IsPlaying = true;
+            _playbackTimer?.Start();
         }
 
         public void Pause()
@@ -219,7 +251,7 @@ namespace WinUIVideoEditor.ViewModels
             }
         }
 
-        public ClipModel AddTextClip()
+        public ClipModel AddTextClip(string initialText = "请输入字幕文本")
         {
             var textTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Text);
             int id = _nextElementId++;
@@ -227,7 +259,7 @@ namespace WinUIVideoEditor.ViewModels
             float posX = 160.0f + (count % 5) * 30.0f;
             float posY = 220.0f + (count % 5) * 50.0f;
 
-            string defaultText = "请输入字幕文本";
+            string defaultText = string.IsNullOrWhiteSpace(initialText) ? "请输入字幕文本" : initialText;
             float initialFontSize = 36.0f;
             float initialWidth = Math.Max(180.0f, defaultText.Length * initialFontSize);
             float initialHeight = initialFontSize * 1.5f;
@@ -235,7 +267,7 @@ namespace WinUIVideoEditor.ViewModels
             var clip = new ClipModel
             {
                 Id = id,
-                Title = $"字幕 {id}",
+                Title = defaultText.Length > 8 ? defaultText.Substring(0, 8) + "..." : defaultText,
                 TrackType = TrackType.Text,
                 ElementType = 0,
                 StartTimeMs = _timeline.CurrentTimeMs,
@@ -308,6 +340,126 @@ namespace WinUIVideoEditor.ViewModels
                 Width = 180,
                 Height = 180,
                 FillColor = Color.FromArgb(180, 230, 80, 80),
+                StrokeColor = Color.FromArgb(255, 255, 255, 255),
+                StrokeWidth = 3.0f
+            };
+
+            shapeTrack?.Clips.Add(clip);
+            SelectedClip = clip;
+            return clip;
+        }
+
+        public ClipModel AddTriangleClip()
+        {
+            var shapeTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Shape);
+            int id = _nextElementId++;
+            int count = shapeTrack?.Clips.Count ?? 0;
+            float posX = 260.0f + (count % 5) * 30.0f;
+            float posY = 200.0f + (count % 5) * 40.0f;
+
+            var clip = new ClipModel
+            {
+                Id = id,
+                Title = $"三角形 {id}",
+                TrackType = TrackType.Shape,
+                ElementType = 3,
+                StartTimeMs = _timeline.CurrentTimeMs,
+                DurationMs = 3000,
+                X = posX,
+                Y = posY,
+                Width = 200,
+                Height = 180,
+                FillColor = Color.FromArgb(180, 245, 166, 35),
+                StrokeColor = Color.FromArgb(255, 255, 255, 255),
+                StrokeWidth = 3.0f
+            };
+
+            shapeTrack?.Clips.Add(clip);
+            SelectedClip = clip;
+            return clip;
+        }
+
+        public ClipModel AddStarClip()
+        {
+            var shapeTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Shape);
+            int id = _nextElementId++;
+            int count = shapeTrack?.Clips.Count ?? 0;
+            float posX = 260.0f + (count % 5) * 30.0f;
+            float posY = 200.0f + (count % 5) * 40.0f;
+
+            var clip = new ClipModel
+            {
+                Id = id,
+                Title = $"五角星 {id}",
+                TrackType = TrackType.Shape,
+                ElementType = 4,
+                StartTimeMs = _timeline.CurrentTimeMs,
+                DurationMs = 3000,
+                X = posX,
+                Y = posY,
+                Width = 200,
+                Height = 200,
+                FillColor = Color.FromArgb(190, 255, 215, 0),
+                StrokeColor = Color.FromArgb(255, 255, 255, 255),
+                StrokeWidth = 3.0f
+            };
+
+            shapeTrack?.Clips.Add(clip);
+            SelectedClip = clip;
+            return clip;
+        }
+
+        public ClipModel AddArrowClip()
+        {
+            var shapeTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Shape);
+            int id = _nextElementId++;
+            int count = shapeTrack?.Clips.Count ?? 0;
+            float posX = 260.0f + (count % 5) * 30.0f;
+            float posY = 200.0f + (count % 5) * 40.0f;
+
+            var clip = new ClipModel
+            {
+                Id = id,
+                Title = $"箭头 {id}",
+                TrackType = TrackType.Shape,
+                ElementType = 5,
+                StartTimeMs = _timeline.CurrentTimeMs,
+                DurationMs = 3000,
+                X = posX,
+                Y = posY,
+                Width = 240,
+                Height = 120,
+                FillColor = Color.FromArgb(180, 76, 217, 100),
+                StrokeColor = Color.FromArgb(255, 255, 255, 255),
+                StrokeWidth = 3.0f
+            };
+
+            shapeTrack?.Clips.Add(clip);
+            SelectedClip = clip;
+            return clip;
+        }
+
+        public ClipModel AddDiamondClip()
+        {
+            var shapeTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Shape);
+            int id = _nextElementId++;
+            int count = shapeTrack?.Clips.Count ?? 0;
+            float posX = 260.0f + (count % 5) * 30.0f;
+            float posY = 200.0f + (count % 5) * 40.0f;
+
+            var clip = new ClipModel
+            {
+                Id = id,
+                Title = $"菱形 {id}",
+                TrackType = TrackType.Shape,
+                ElementType = 6,
+                StartTimeMs = _timeline.CurrentTimeMs,
+                DurationMs = 3000,
+                X = posX,
+                Y = posY,
+                Width = 180,
+                Height = 180,
+                FillColor = Color.FromArgb(180, 142, 68, 173),
                 StrokeColor = Color.FromArgb(255, 255, 255, 255),
                 StrokeWidth = 3.0f
             };

@@ -370,6 +370,98 @@ void SkiaRenderer::DrawPrimitive(const PrimitiveElementDesc& desc)
 
         sk_paint_delete(paint);
     }
+    else if (desc.ElementType >= 3 && desc.ElementType <= 7) // Path-based vector shapes
+    {
+        sk_path_t* path = sk_path_new();
+
+        if (desc.ElementType == 3) // Triangle
+        {
+            sk_path_move_to(path, desc.X + desc.Width * 0.5f, desc.Y);
+            sk_path_line_to(path, desc.X + desc.Width, desc.Y + desc.Height);
+            sk_path_line_to(path, desc.X, desc.Y + desc.Height);
+            sk_path_close(path);
+        }
+        else if (desc.ElementType == 4) // 5-Pointed Star
+        {
+            float cx = desc.X + desc.Width * 0.5f;
+            float cy = desc.Y + desc.Height * 0.5f;
+            float R = (std::min)(desc.Width, desc.Height) * 0.5f;
+            float r = R * 0.4f;
+            for (int i = 0; i < 10; ++i)
+            {
+                float angle = -1.5707963f + i * 0.62831853f; // -pi/2 + i * 2pi/10
+                float rad = (i % 2 == 0) ? R : r;
+                float px = cx + rad * cosf(angle);
+                float py = cy + rad * sinf(angle);
+                if (i == 0) sk_path_move_to(path, px, py);
+                else sk_path_line_to(path, px, py);
+            }
+            sk_path_close(path);
+        }
+        else if (desc.ElementType == 5) // Right Arrow
+        {
+            float x = desc.X;
+            float y = desc.Y;
+            float w = desc.Width;
+            float h = desc.Height;
+            float shaftTop = y + h * 0.28f;
+            float shaftBottom = y + h * 0.72f;
+            float headX = x + w * 0.62f;
+
+            sk_path_move_to(path, x, shaftTop);
+            sk_path_line_to(path, headX, shaftTop);
+            sk_path_line_to(path, headX, y);
+            sk_path_line_to(path, x + w, y + h * 0.5f);
+            sk_path_line_to(path, headX, y + h);
+            sk_path_line_to(path, headX, shaftBottom);
+            sk_path_line_to(path, x, shaftBottom);
+            sk_path_close(path);
+        }
+        else if (desc.ElementType == 6) // Diamond (Rhombus)
+        {
+            sk_path_move_to(path, desc.X + desc.Width * 0.5f, desc.Y);
+            sk_path_line_to(path, desc.X + desc.Width, desc.Y + desc.Height * 0.5f);
+            sk_path_line_to(path, desc.X + desc.Width * 0.5f, desc.Y + desc.Height);
+            sk_path_line_to(path, desc.X, desc.Y + desc.Height * 0.5f);
+            sk_path_close(path);
+        }
+        else if (desc.ElementType == 7) // Heart
+        {
+            float x = desc.X;
+            float y = desc.Y;
+            float w = desc.Width;
+            float h = desc.Height;
+            sk_path_move_to(path, x + w * 0.5f, y + h * 0.82f);
+            sk_path_cubic_to(path, x + w * 0.15f, y + h * 0.60f, x, y + h * 0.35f, x, y + h * 0.20f);
+            sk_path_cubic_to(path, x, y, x + w * 0.35f, y, x + w * 0.5f, y + h * 0.25f);
+            sk_path_cubic_to(path, x + w * 0.65f, y, x + w, y, x + w, y + h * 0.20f);
+            sk_path_cubic_to(path, x + w, y + h * 0.35f, x + w * 0.85f, y + h * 0.60f, x + w * 0.5f, y + h * 0.82f);
+            sk_path_close(path);
+        }
+
+        sk_paint_t* paint = sk_paint_new();
+        sk_paint_set_antialias(paint, true);
+
+        // Fill
+        if (desc.FillColor != 0)
+        {
+            sk_paint_set_style(paint, SK_PAINT_STYLE_FILL);
+            sk_paint_set_color(paint, desc.FillColor);
+            sk_canvas_draw_path(m_skCanvas, path, paint);
+        }
+
+        // Stroke
+        if (desc.StrokeColor != 0 && desc.StrokeWidth > 0.0f)
+        {
+            sk_paint_set_style(paint, SK_PAINT_STYLE_STROKE);
+            sk_paint_set_color(paint, desc.StrokeColor);
+            sk_paint_set_stroke_width(paint, desc.StrokeWidth);
+            sk_canvas_draw_path(m_skCanvas, path, paint);
+        }
+
+        sk_paint_delete(paint);
+        sk_path_delete(path);
+    }
 
     // Render selection bounding box and handles if element is selected
     if (desc.IsSelected)

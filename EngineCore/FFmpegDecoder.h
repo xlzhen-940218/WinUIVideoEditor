@@ -79,5 +79,5 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cpuUploadTexture;
     SwsContext* m_swsCtx = nullptr;
 
-    std::mutex m_lock;
+    std::recursive_mutex m_lock;
 };

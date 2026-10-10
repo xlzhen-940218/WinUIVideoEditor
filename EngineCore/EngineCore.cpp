@@ -29,6 +29,10 @@ struct EngineContext
     std::mutex elementsLock;
     std::recursive_mutex renderLock;
 
+    std::vector<VideoClipDesc> videoClips;
+    std::mutex videoClipsLock;
+    int currentClipIndex = -1;
+
     std::atomic<bool> isPlaying{ false };
     std::atomic<bool> stopPlaybackLoop{ false };
     std::thread playbackThread;
@@ -42,24 +46,106 @@ struct EngineContext
 
         renderer->BeginFrame();
 
-        // 1. Hardware video frame rendering (NV12 -> RGBA8 in VRAM)
-        if (decoder && decoder->IsLoaded())
+        // 1. Advance timeline playback if playing
+        if (isPlaying.load())
         {
-            if (isPlaying.load())
+            currentPlaybackPosMs += 33;
+            int64_t totalDur = 0;
             {
-                bool gotFrame = decoder->DecodeNextFrame(&currentPlaybackPosMs);
-                if (!gotFrame && decoder->GetDurationMs() > 0 && currentPlaybackPosMs >= decoder->GetDurationMs() - 50)
+                std::lock_guard<std::mutex> vLock(videoClipsLock);
+                for (const auto& c : videoClips)
                 {
-                    isPlaying.store(false);
+                    totalDur = (std::max)(totalDur, c.StartTimeMs + c.DurationMs);
                 }
             }
-            decoder->RenderCurrentFrame(
-                renderer->GetTargetTexture(),
-                renderer->GetWidth(),
-                renderer->GetHeight());
+            if (totalDur <= 0 && decoder && decoder->GetDurationMs() > 0)
+            {
+                totalDur = decoder->GetDurationMs();
+            }
+            if (totalDur > 0 && currentPlaybackPosMs >= totalDur)
+            {
+                currentPlaybackPosMs = totalDur;
+                isPlaying.store(false);
+            }
         }
 
-        // 2. Google Skia vector overlay rendering (Text, Rounded Rectangles, Circles)
+        // 2. Hardware video frame rendering (NV12 -> RGBA8 in VRAM)
+        {
+            std::lock_guard<std::mutex> vLock(videoClipsLock);
+            if (!videoClips.empty())
+            {
+                int targetIdx = -1;
+                for (size_t i = 0; i < videoClips.size(); ++i)
+                {
+                    if (currentPlaybackPosMs >= videoClips[i].StartTimeMs &&
+                        currentPlaybackPosMs < (videoClips[i].StartTimeMs + videoClips[i].DurationMs))
+                    {
+                        targetIdx = static_cast<int>(i);
+                        break;
+                    }
+                }
+
+                if (targetIdx >= 0)
+                {
+                    const auto& clip = videoClips[targetIdx];
+                    int64_t localOffset = currentPlaybackPosMs - clip.StartTimeMs;
+
+                    if (currentClipIndex != targetIdx)
+                    {
+                        decoder->OpenFile(clip.FilePath);
+                        currentClipIndex = targetIdx;
+                        decoder->Seek(localOffset);
+                    }
+                    else if (isPlaying.load())
+                    {
+                        int64_t clipFramePos = 0;
+                        bool gotFrame = decoder->DecodeNextFrame(&clipFramePos);
+                        if (gotFrame && clipFramePos > localOffset)
+                        {
+                            currentPlaybackPosMs = clip.StartTimeMs + clipFramePos;
+                        }
+                        else if (gotFrame)
+                        {
+                            currentPlaybackPosMs += 33;
+                        }
+                        else
+                        {
+                            // Reached EOF of current clip, advance to the next clip
+                            currentPlaybackPosMs = clip.StartTimeMs + clip.DurationMs;
+                        }
+                    }
+
+                    decoder->RenderCurrentFrame(
+                        renderer->GetTargetTexture(),
+                        renderer->GetWidth(),
+                        renderer->GetHeight());
+                }
+                else if (targetIdx == -1 && !videoClips.empty() && currentPlaybackPosMs >= (videoClips.back().StartTimeMs + videoClips.back().DurationMs))
+                {
+                    if (isPlaying.load())
+                    {
+                        isPlaying.store(false);
+                    }
+                }
+            }
+            else if (decoder && decoder->IsLoaded())
+            {
+                if (isPlaying.load())
+                {
+                    bool gotFrame = decoder->DecodeNextFrame(&currentPlaybackPosMs);
+                    if (!gotFrame && decoder->GetDurationMs() > 0 && currentPlaybackPosMs >= decoder->GetDurationMs() - 50)
+                    {
+                        isPlaying.store(false);
+                    }
+                }
+                decoder->RenderCurrentFrame(
+                    renderer->GetTargetTexture(),
+                    renderer->GetWidth(),
+                    renderer->GetHeight());
+            }
+        }
+
+        // 3. Google Skia vector overlay rendering (Text, Rounded Rectangles, Circles, Shapes)
         if (skiaRenderer && renderer->GetTargetTexture())
         {
             if (skiaRenderer->BeginDraw(renderer->GetTargetTexture()))
@@ -195,16 +281,72 @@ ENGINE_API bool Engine_LoadMedia(void* engine, const wchar_t* filePath)
     return ok;
 }
 
+ENGINE_API void Engine_ClearVideoClips(void* engine)
+{
+    auto ctx = static_cast<EngineContext*>(engine);
+    if (!ctx) return;
+    std::lock_guard<std::mutex> lock(ctx->videoClipsLock);
+    ctx->videoClips.clear();
+    ctx->currentClipIndex = -1;
+}
+
+ENGINE_API void Engine_AddVideoClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs)
+{
+    auto ctx = static_cast<EngineContext*>(engine);
+    if (!ctx || !filePath) return;
+    std::lock_guard<std::mutex> lock(ctx->videoClipsLock);
+    VideoClipDesc desc = {};
+    wcsncpy_s(desc.FilePath, filePath, 259);
+    desc.StartTimeMs = startTimeMs;
+    desc.DurationMs = durationMs;
+    ctx->videoClips.push_back(desc);
+}
+
 ENGINE_API void Engine_Seek(void* engine, int64_t timeStampMs)
 {
     auto ctx = static_cast<EngineContext*>(engine);
     if (!ctx) return;
 
-    if (ctx->decoder)
+    std::lock_guard<std::recursive_mutex> rLock(ctx->renderLock);
+    ctx->currentPlaybackPosMs = (std::max)((int64_t)0, timeStampMs);
+
     {
-        ctx->decoder->Seek(timeStampMs);
+        std::lock_guard<std::mutex> vLock(ctx->videoClipsLock);
+        if (!ctx->videoClips.empty())
+        {
+            int targetIdx = -1;
+            for (size_t i = 0; i < ctx->videoClips.size(); ++i)
+            {
+                if (ctx->currentPlaybackPosMs >= ctx->videoClips[i].StartTimeMs &&
+                    ctx->currentPlaybackPosMs < (ctx->videoClips[i].StartTimeMs + ctx->videoClips[i].DurationMs))
+                {
+                    targetIdx = static_cast<int>(i);
+                    break;
+                }
+            }
+            if (targetIdx == -1 && !ctx->videoClips.empty())
+            {
+                targetIdx = static_cast<int>(ctx->videoClips.size() - 1);
+            }
+
+            if (targetIdx >= 0 && targetIdx < static_cast<int>(ctx->videoClips.size()))
+            {
+                const auto& clip = ctx->videoClips[targetIdx];
+                int64_t localOffset = (std::max)((int64_t)0, ctx->currentPlaybackPosMs - clip.StartTimeMs);
+                if (ctx->currentClipIndex != targetIdx)
+                {
+                    ctx->decoder->OpenFile(clip.FilePath);
+                    ctx->currentClipIndex = targetIdx;
+                }
+                ctx->decoder->Seek(localOffset);
+            }
+        }
+        else if (ctx->decoder)
+        {
+            ctx->decoder->Seek(ctx->currentPlaybackPosMs);
+        }
     }
-    ctx->currentPlaybackPosMs = timeStampMs;
+
     ctx->RenderSingleFrame();
 }
 
@@ -212,11 +354,10 @@ ENGINE_API void Engine_Play(void* engine)
 {
     auto ctx = static_cast<EngineContext*>(engine);
     if (!ctx) return;
-    if (ctx->decoder && ctx->decoder->GetDurationMs() > 0 &&
-        ctx->currentPlaybackPosMs >= ctx->decoder->GetDurationMs() - 50)
+    int64_t totalDur = Engine_GetDurationMs(engine);
+    if (totalDur > 0 && ctx->currentPlaybackPosMs >= totalDur - 50)
     {
-        ctx->decoder->Seek(0);
-        ctx->currentPlaybackPosMs = 0;
+        Engine_Seek(engine, 0);
     }
     ctx->isPlaying.store(true);
 }
@@ -235,6 +376,23 @@ ENGINE_API bool Engine_IsPlaying(void* engine)
 }
 
 ENGINE_API int64_t Engine_GetDurationMs(void* engine)
+{
+    auto ctx = static_cast<EngineContext*>(engine);
+    if (!ctx) return 0;
+    std::lock_guard<std::mutex> lock(ctx->videoClipsLock);
+    if (!ctx->videoClips.empty())
+    {
+        int64_t total = 0;
+        for (const auto& c : ctx->videoClips)
+        {
+            total = (std::max)(total, c.StartTimeMs + c.DurationMs);
+        }
+        return total;
+    }
+    return ctx->decoder ? ctx->decoder->GetDurationMs() : 0;
+}
+
+ENGINE_API int64_t Engine_GetLoadedMediaDurationMs(void* engine)
 {
     auto ctx = static_cast<EngineContext*>(engine);
     if (!ctx || !ctx->decoder) return 0;
@@ -333,14 +491,23 @@ ENGINE_API bool Engine_StartExport(
         }
     }
 
+    std::vector<VideoClipDesc> clips;
+    {
+        std::lock_guard<std::mutex> lock(ctx->videoClipsLock);
+        clips = ctx->videoClips;
+    }
+
     return ctx->encoder->StartExport(
         ctx->renderer->GetDevice(),
         ctx->colorConverter.get(),
         ctx->skiaRenderer.get(),
         ctx->decoder.get(),
+        clips,
         elemList,
         *config,
-        callback);
+        callback,
+        ctx->width,
+        ctx->height);
 }
 
 ENGINE_API void Engine_CancelExport(void* engine)

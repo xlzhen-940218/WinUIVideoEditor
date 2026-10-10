@@ -8,7 +8,7 @@ namespace WinUIVideoEditor.Models
     public class TimelineModel : INotifyPropertyChanged
     {
         private long _currentTimeMs;
-        private long _totalDurationMs = 30000; // default 30 seconds
+        private long _totalDurationMs = 0; // default 0 before opening media
         private double _pixelsPerSecond = 50.0; // scale factor
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -20,14 +20,17 @@ namespace WinUIVideoEditor.Models
 
         public ObservableCollection<TrackModel> Tracks { get; set; } = new();
 
+        public bool CanPlay => _totalDurationMs > 0;
+
         public long CurrentTimeMs
         {
             get => _currentTimeMs;
             set
             {
-                if (_currentTimeMs != value)
+                long clamped = _totalDurationMs > 0 ? Math.Clamp(value, 0, _totalDurationMs) : 0;
+                if (_currentTimeMs != clamped)
                 {
-                    _currentTimeMs = Math.Clamp(value, 0, _totalDurationMs);
+                    _currentTimeMs = clamped;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(CurrentTimeFormatted));
                     OnPropertyChanged(nameof(PlayheadPositionX));
@@ -40,12 +43,18 @@ namespace WinUIVideoEditor.Models
             get => _totalDurationMs;
             set
             {
-                if (_totalDurationMs != value)
+                long clamped = Math.Max(0, value);
+                if (_totalDurationMs != clamped)
                 {
-                    _totalDurationMs = Math.Max(1000, value);
+                    _totalDurationMs = clamped;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(TotalDurationFormatted));
                     OnPropertyChanged(nameof(TimelineWidth));
+                    OnPropertyChanged(nameof(CanPlay));
+                    if (_currentTimeMs > _totalDurationMs)
+                    {
+                        CurrentTimeMs = _totalDurationMs;
+                    }
                 }
             }
         }

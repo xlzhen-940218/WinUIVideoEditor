@@ -46,7 +46,7 @@
                         <FontIcon Glyph="&#xE892;" FontSize="12"/>
                     </Button>
 
-                    <Button x:Name="BtnPlayPause" Click="OnPlayPauseClicked" Width="42" Height="42" Padding="0"
+                    <Button x:Name="BtnPlayPause" Click="OnPlayPauseClicked" IsEnabled="False" Width="42" Height="42" Padding="0"
                             Style="{StaticResource AccentButtonStyle}" ToolTipService.ToolTip="播放 / 暂停 (空格键)">
                         <FontIcon x:Name="IconPlayPause" Glyph="&#xE768;" FontSize="16"/>
                     </Button>
@@ -60,7 +60,7 @@
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock x:Name="TxtCurrentTime" Text="00:00:00:00" FontFamily="Consolas" FontSize="13" FontWeight="Bold" Foreground="#4CC2FF"/>
                             <TextBlock Text="/" Foreground="#666677" FontSize="13"/>
-                            <TextBlock x:Name="TxtTotalDuration" Text="00:00:30:00" FontFamily="Consolas" FontSize="13" Foreground="#9999AA"/>
+                            <TextBlock x:Name="TxtTotalDuration" Text="00:00:00:00" FontFamily="Consolas" FontSize="13" Foreground="#9999AA"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -100,9 +100,6 @@
                     <TabViewItem Header="文本字幕" IsClosable="False">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
                             <StackPanel Spacing="16">
-                                <Button Content="+ 添加文本字幕" Click="OnAddTextClicked" HorizontalAlignment="Stretch"
-                                        Style="{StaticResource AccentButtonStyle}" Height="38"/>
-
                                 <TextBlock Text="文本属性" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
 
                                 <StackPanel Spacing="6">
@@ -126,12 +123,16 @@
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="字体填充颜色" FontSize="12" Foreground="#AAAAAA"/>
-                                    <ColorPicker x:Name="ColorPickerFill" ColorChanged="OnFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
+                                        <ColorPicker x:Name="ColorPickerFill" ColorChanged="OnFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    </Viewbox>
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="描边边框颜色" FontSize="12" Foreground="#AAAAAA"/>
-                                    <ColorPicker x:Name="ColorPickerStroke" ColorChanged="OnStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
+                                        <ColorPicker x:Name="ColorPickerStroke" ColorChanged="OnStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    </Viewbox>
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
@@ -143,7 +144,10 @@
                                 </StackPanel>
 
                                 <Button Content="删除当前字幕" Click="OnDeleteElementClicked" HorizontalAlignment="Stretch"
-                                        Background="#442222" Foreground="#FF6666" Margin="0,12,0,0"/>
+                                        Background="#442222" Foreground="#FF6666" Margin="0,4,0,0"/>
+
+                                <Button Content="+ 添加文本字幕" Click="OnAddTextClicked" HorizontalAlignment="Stretch"
+                                        Style="{StaticResource AccentButtonStyle}" Height="38" Margin="0,12,0,0"/>
                             </StackPanel>
                         </ScrollViewer>
                     </TabViewItem>
@@ -152,25 +156,38 @@
                     <TabViewItem Header="矢量图形" IsClosable="False">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,10">
                             <StackPanel Spacing="16">
-                                <Grid ColumnSpacing="8">
+                                <Grid ColumnSpacing="6" RowSpacing="6">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    <Button Grid.Column="0" Content="+ 矩形" Click="OnAddRectangleClicked" HorizontalAlignment="Stretch" Height="36"/>
-                                    <Button Grid.Column="1" Content="+ 圆形" Click="OnAddCircleClicked" HorizontalAlignment="Stretch" Height="36"/>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Button Grid.Row="0" Grid.Column="0" Content="■ 矩形" Click="OnAddRectangleClicked" HorizontalAlignment="Stretch" Height="34"/>
+                                    <Button Grid.Row="0" Grid.Column="1" Content="● 圆形" Click="OnAddCircleClicked" HorizontalAlignment="Stretch" Height="34"/>
+                                    <Button Grid.Row="1" Grid.Column="0" Content="▲ 三角形" Click="OnAddTriangleClicked" HorizontalAlignment="Stretch" Height="34"/>
+                                    <Button Grid.Row="1" Grid.Column="1" Content="★ 五角星" Click="OnAddStarClicked" HorizontalAlignment="Stretch" Height="34"/>
+                                    <Button Grid.Row="2" Grid.Column="0" Content="➔ 箭头" Click="OnAddArrowClicked" HorizontalAlignment="Stretch" Height="34"/>
+                                    <Button Grid.Row="2" Grid.Column="1" Content="♦ 菱形" Click="OnAddDiamondClicked" HorizontalAlignment="Stretch" Height="34"/>
                                 </Grid>
 
                                 <TextBlock Text="图形属性" FontWeight="SemiBold" FontSize="13" Foreground="#CCCCCC"/>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="填充颜色" FontSize="12" Foreground="#AAAAAA"/>
-                                    <ColorPicker x:Name="ShapeColorPickerFill" ColorChanged="OnShapeFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
+                                        <ColorPicker x:Name="ShapeColorPickerFill" ColorChanged="OnShapeFillColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    </Viewbox>
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">
                                     <TextBlock Text="边框描边颜色" FontSize="12" Foreground="#AAAAAA"/>
-                                    <ColorPicker x:Name="ShapeColorPickerStroke" ColorChanged="OnShapeStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
+                                        <ColorPicker x:Name="ShapeColorPickerStroke" ColorChanged="OnShapeStrokeColorChanged" IsColorChannelTextInputVisible="False"/>
+                                    </Viewbox>
                                 </StackPanel>
 
                                 <StackPanel Spacing="6">

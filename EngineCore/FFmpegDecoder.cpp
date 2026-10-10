@@ -24,7 +24,7 @@ FFmpegDecoder::~FFmpegDecoder()
 
 bool FFmpegDecoder::Initialize(ID3D11Device* device, VideoColorConverter* converter)
 {
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
     m_d3dDevice = device;
     m_colorConverter = converter;
 
@@ -39,7 +39,7 @@ void FFmpegDecoder::Cleanup()
 {
     CloseFile();
 
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
     if (m_frame) { av_frame_free(&m_frame); m_frame = nullptr; }
     if (m_swFrame) { av_frame_free(&m_swFrame); m_swFrame = nullptr; }
     if (m_packet) { av_packet_free(&m_packet); m_packet = nullptr; }
@@ -47,7 +47,7 @@ void FFmpegDecoder::Cleanup()
 
 void FFmpegDecoder::CloseFile()
 {
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
 
     if (m_swsCtx)
     {
@@ -85,7 +85,7 @@ bool FFmpegDecoder::OpenFile(const wchar_t* filePath)
 {
     CloseFile();
 
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
 
     if (!filePath || !m_d3dDevice) return false;
 
@@ -269,7 +269,7 @@ void FFmpegDecoder::UpdateCachedFrameFromAvFrame()
 
 bool FFmpegDecoder::DecodeNextFrame(int64_t* outPtsMs)
 {
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
 
     if (!m_formatCtx || !m_codecCtx || m_videoStreamIdx < 0) return false;
 
@@ -335,7 +335,7 @@ bool FFmpegDecoder::DecodeNextFrame(int64_t* outPtsMs)
 
 bool FFmpegDecoder::RenderCurrentFrame(ID3D11Texture2D* targetTexture, int targetWidth, int targetHeight)
 {
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
 
     if (!m_hasCachedFrame || !m_cachedFrameRgba || !m_colorConverter || !targetTexture)
     {
@@ -359,7 +359,7 @@ bool FFmpegDecoder::ReadAndRenderFrame(ID3D11Texture2D* targetTexture, int targe
 
 bool FFmpegDecoder::Seek(int64_t timeStampMs)
 {
-    std::lock_guard<std::mutex> lock(m_lock);
+    std::lock_guard<std::recursive_mutex> lock(m_lock);
 
     if (!m_formatCtx || !m_codecCtx || m_videoStreamIdx < 0) return false;
 
@@ -367,6 +367,10 @@ bool FFmpegDecoder::Seek(int64_t timeStampMs)
     int64_t targetPts = static_cast<int64_t>((timeStampMs / 1000.0) / av_q2d(videoStream->time_base));
 
     int ret = av_seek_frame(m_formatCtx, m_videoStreamIdx, targetPts, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0)
+    {
+        ret = av_seek_frame(m_formatCtx, -1, targetPts, AVSEEK_FLAG_BACKWARD);
+    }
     if (ret >= 0)
     {
         avcodec_flush_buffers(m_codecCtx);
@@ -388,7 +392,21 @@ bool FFmpegDecoder::Seek(int64_t timeStampMs)
             }
 
             int readRet = av_read_frame(m_formatCtx, m_packet);
-            if (readRet < 0) break;
+            if (readRet < 0)
+            {
+                avcodec_send_packet(m_codecCtx, nullptr);
+                int flushRet = avcodec_receive_frame(m_codecCtx, m_frame);
+                if (flushRet == 0)
+                {
+                    if (m_frame->pts != AV_NOPTS_VALUE)
+                    {
+                        m_currentPosMs = static_cast<int64_t>(m_frame->pts * av_q2d(videoStream->time_base) * 1000.0);
+                    }
+                    UpdateCachedFrameFromAvFrame();
+                    av_frame_unref(m_frame);
+                }
+                break;
+            }
             if (m_packet->stream_index == m_videoStreamIdx)
             {
                 avcodec_send_packet(m_codecCtx, m_packet);

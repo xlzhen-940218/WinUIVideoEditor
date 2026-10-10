@@ -22,6 +22,12 @@ namespace WinUIVideoEditor.Native
         public static extern bool Engine_LoadMedia(IntPtr engine, string filePath);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void Engine_ClearVideoClips(IntPtr engine);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        public static extern void Engine_AddVideoClip(IntPtr engine, string filePath, long startTimeMs, long durationMs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void Engine_Seek(IntPtr engine, long timeStampMs);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
@@ -35,6 +41,9 @@ namespace WinUIVideoEditor.Native
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern long Engine_GetDurationMs(IntPtr engine);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern long Engine_GetLoadedMediaDurationMs(IntPtr engine);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern long Engine_GetCurrentPositionMs(IntPtr engine);

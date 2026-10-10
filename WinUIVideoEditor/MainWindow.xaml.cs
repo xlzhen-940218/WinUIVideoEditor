@@ -49,11 +49,12 @@ namespace WinUIVideoEditor
                         TxtCurrentTime.Text = _viewModel.Timeline.CurrentTimeFormatted;
                     });
                 }
-                else if (e.PropertyName == nameof(TimelineModel.TotalDurationMs))
+                else if (e.PropertyName == nameof(TimelineModel.TotalDurationMs) || e.PropertyName == nameof(TimelineModel.CanPlay))
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
                         TxtTotalDuration.Text = _viewModel.Timeline.TotalDurationFormatted;
+                        BtnPlayPause.IsEnabled = _viewModel.Timeline.CanPlay;
                     });
                 }
             };
@@ -146,7 +147,12 @@ namespace WinUIVideoEditor
                 {
                     TxtTotalDuration.Text = _viewModel.Timeline.TotalDurationFormatted;
                     TxtCurrentTime.Text = "00:00:00:00";
+                    BtnPlayPause.IsEnabled = _viewModel.Timeline.CanPlay;
                     NativeViewport.UpdateChildWindowPosition();
+                    if (NativeViewport.EngineHandle != IntPtr.Zero)
+                    {
+                        NativeEngineApi.Engine_RenderFrame(NativeViewport.EngineHandle);
+                    }
                 }
             }
         }
@@ -170,7 +176,8 @@ namespace WinUIVideoEditor
 
         private void OnAddTextClicked(object sender, RoutedEventArgs e)
         {
-            var clip = _viewModel.AddTextClip();
+            string initialText = !string.IsNullOrWhiteSpace(TbTextContent.Text) ? TbTextContent.Text : "请输入字幕文本";
+            var clip = _viewModel.AddTextClip(initialText);
             LeftToolboxTab.SelectedIndex = 0;
             UpdatePropertyPanelFromSelectedClip();
             ViewportOverlay.Refresh();
@@ -187,6 +194,38 @@ namespace WinUIVideoEditor
         private void OnAddCircleClicked(object sender, RoutedEventArgs e)
         {
             var clip = _viewModel.AddCircleClip();
+            LeftToolboxTab.SelectedIndex = 1;
+            UpdatePropertyPanelFromSelectedClip();
+            ViewportOverlay.Refresh();
+        }
+
+        private void OnAddTriangleClicked(object sender, RoutedEventArgs e)
+        {
+            var clip = _viewModel.AddTriangleClip();
+            LeftToolboxTab.SelectedIndex = 1;
+            UpdatePropertyPanelFromSelectedClip();
+            ViewportOverlay.Refresh();
+        }
+
+        private void OnAddStarClicked(object sender, RoutedEventArgs e)
+        {
+            var clip = _viewModel.AddStarClip();
+            LeftToolboxTab.SelectedIndex = 1;
+            UpdatePropertyPanelFromSelectedClip();
+            ViewportOverlay.Refresh();
+        }
+
+        private void OnAddArrowClicked(object sender, RoutedEventArgs e)
+        {
+            var clip = _viewModel.AddArrowClip();
+            LeftToolboxTab.SelectedIndex = 1;
+            UpdatePropertyPanelFromSelectedClip();
+            ViewportOverlay.Refresh();
+        }
+
+        private void OnAddDiamondClicked(object sender, RoutedEventArgs e)
+        {
+            var clip = _viewModel.AddDiamondClip();
             LeftToolboxTab.SelectedIndex = 1;
             UpdatePropertyPanelFromSelectedClip();
             ViewportOverlay.Refresh();
