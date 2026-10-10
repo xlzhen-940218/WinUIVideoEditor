@@ -60,6 +60,7 @@ bool FFmpegEncoder::StartExport(
     SkiaRenderer* skiaRenderer,
     FFmpegDecoder* decoder,
     const std::vector<VideoClipDesc>& videoClips,
+    const std::vector<VideoClipDesc>& audioClips,
     const std::vector<PrimitiveElementDesc>& elements,
     const ExportConfig& config,
     ExportProgressCallback callback,
@@ -87,6 +88,7 @@ bool FFmpegEncoder::StartExport(
         skiaRenderer,
         decoder,
         videoClips,
+        audioClips,
         elements,
         config,
         callback,
@@ -102,6 +104,7 @@ void FFmpegEncoder::ExportWorker(
     SkiaRenderer* skiaRenderer,
     FFmpegDecoder* decoder,
     std::vector<VideoClipDesc> videoClips,
+    std::vector<VideoClipDesc> audioClips,
     std::vector<PrimitiveElementDesc> elements,
     ExportConfig config,
     ExportProgressCallback callback,
@@ -312,9 +315,182 @@ void FFmpegEncoder::ExportWorker(
         }
     }
 
+    // Audio Extraction & Transcoding Preparation
+    std::vector<VideoClipDesc> effAudioClips = audioClips.empty() ? videoClips : audioClips;
+    int64_t totalAudioSamples = (totalDurationMs * 44100) / 1000;
+    std::vector<float> pcmL;
+    std::vector<float> pcmR;
+    bool hasAudioContent = false;
+
+    if (totalAudioSamples > 0 && !effAudioClips.empty())
+    {
+        pcmL.assign(static_cast<size_t>(totalAudioSamples), 0.0f);
+        pcmR.assign(static_cast<size_t>(totalAudioSamples), 0.0f);
+
+        for (const auto& aClip : effAudioClips)
+        {
+            int uLen = WideCharToMultiByte(CP_UTF8, 0, aClip.FilePath, -1, nullptr, 0, nullptr, nullptr);
+            if (uLen <= 0) continue;
+            std::string uPath(uLen, '\0');
+            WideCharToMultiByte(CP_UTF8, 0, aClip.FilePath, -1, &uPath[0], uLen, nullptr, nullptr);
+
+            AVFormatContext* aInFmt = nullptr;
+            if (avformat_open_input(&aInFmt, uPath.c_str(), nullptr, nullptr) != 0 || !aInFmt)
+            {
+                continue;
+            }
+            if (avformat_find_stream_info(aInFmt, nullptr) < 0)
+            {
+                avformat_close_input(&aInFmt);
+                continue;
+            }
+
+            const AVCodec* aDec = nullptr;
+            int aStreamIdx = av_find_best_stream(aInFmt, AVMEDIA_TYPE_AUDIO, -1, -1, &aDec, 0);
+            if (aStreamIdx < 0 || !aDec)
+            {
+                avformat_close_input(&aInFmt);
+                continue;
+            }
+
+            AVCodecContext* aDecCtx = avcodec_alloc_context3(aDec);
+            if (!aDecCtx)
+            {
+                avformat_close_input(&aInFmt);
+                continue;
+            }
+            if (avcodec_parameters_to_context(aDecCtx, aInFmt->streams[aStreamIdx]->codecpar) < 0 ||
+                avcodec_open2(aDecCtx, aDec, nullptr) < 0)
+            {
+                avcodec_free_context(&aDecCtx);
+                avformat_close_input(&aInFmt);
+                continue;
+            }
+
+            SwrContext* swr = nullptr;
+            AVChannelLayout stereoLayout;
+            av_channel_layout_default(&stereoLayout, 2);
+            swr_alloc_set_opts2(&swr, &stereoLayout, AV_SAMPLE_FMT_FLTP, 44100,
+                                &aDecCtx->ch_layout, aDecCtx->sample_fmt, aDecCtx->sample_rate,
+                                0, nullptr);
+            if (!swr || swr_init(swr) < 0)
+            {
+                if (swr) swr_free(&swr);
+                avcodec_free_context(&aDecCtx);
+                avformat_close_input(&aInFmt);
+                continue;
+            }
+
+            hasAudioContent = true;
+
+            AVFrame* aFrame = av_frame_alloc();
+            AVPacket* aPkt = av_packet_alloc();
+
+            int64_t clipStartSample = (aClip.StartTimeMs * 44100) / 1000;
+            int64_t currentSampleOffset = clipStartSample;
+            int64_t clipEndSample = ((aClip.StartTimeMs + aClip.DurationMs) * 44100) / 1000;
+
+            std::vector<float> resampleL(4096);
+            std::vector<float> resampleR(4096);
+            uint8_t* outPlanes[2] = { reinterpret_cast<uint8_t*>(resampleL.data()), reinterpret_cast<uint8_t*>(resampleR.data()) };
+
+            while (av_read_frame(aInFmt, aPkt) >= 0)
+            {
+                if (aPkt->stream_index == aStreamIdx)
+                {
+                    if (avcodec_send_packet(aDecCtx, aPkt) >= 0)
+                    {
+                        while (avcodec_receive_frame(aDecCtx, aFrame) >= 0)
+                        {
+                            int outCount = swr_convert(swr, outPlanes, 4096,
+                                const_cast<const uint8_t**>(aFrame->data), aFrame->nb_samples);
+                            for (int s = 0; s < outCount; ++s)
+                            {
+                                int64_t targetIdx = currentSampleOffset + s;
+                                if (targetIdx >= 0 && targetIdx < totalAudioSamples && targetIdx < clipEndSample)
+                                {
+                                    pcmL[targetIdx] = resampleL[s];
+                                    pcmR[targetIdx] = resampleR[s];
+                                }
+                            }
+                            currentSampleOffset += outCount;
+                            av_frame_unref(aFrame);
+                        }
+                    }
+                }
+                av_packet_unref(aPkt);
+            }
+
+            // Flush decoder
+            avcodec_send_packet(aDecCtx, nullptr);
+            while (avcodec_receive_frame(aDecCtx, aFrame) >= 0)
+            {
+                int outCount = swr_convert(swr, outPlanes, 4096,
+                    const_cast<const uint8_t**>(aFrame->data), aFrame->nb_samples);
+                for (int s = 0; s < outCount; ++s)
+                {
+                    int64_t targetIdx = currentSampleOffset + s;
+                    if (targetIdx >= 0 && targetIdx < totalAudioSamples && targetIdx < clipEndSample)
+                    {
+                        pcmL[targetIdx] = resampleL[s];
+                        pcmR[targetIdx] = resampleR[s];
+                    }
+                }
+                currentSampleOffset += outCount;
+                av_frame_unref(aFrame);
+            }
+
+            av_frame_free(&aFrame);
+            av_packet_free(&aPkt);
+            swr_free(&swr);
+            avcodec_free_context(&aDecCtx);
+            avformat_close_input(&aInFmt);
+        }
+    }
+
+    AVStream* outAudioStream = nullptr;
+    AVCodecContext* aacEncCtx = nullptr;
+    const AVCodec* aacEncoder = avcodec_find_encoder(AV_CODEC_ID_AAC);
+
+    if (hasAudioContent && aacEncoder)
+    {
+        outAudioStream = avformat_new_stream(outFormatCtx, nullptr);
+        if (outAudioStream)
+        {
+            aacEncCtx = avcodec_alloc_context3(aacEncoder);
+            if (aacEncCtx)
+            {
+                aacEncCtx->codec_id = AV_CODEC_ID_AAC;
+                aacEncCtx->codec_type = AVMEDIA_TYPE_AUDIO;
+                aacEncCtx->sample_rate = 44100;
+                aacEncCtx->sample_fmt = AV_SAMPLE_FMT_FLTP;
+                aacEncCtx->bit_rate = 192000;
+                av_channel_layout_default(&aacEncCtx->ch_layout, 2);
+                aacEncCtx->time_base = { 1, 44100 };
+                outAudioStream->time_base = aacEncCtx->time_base;
+
+                if (outFormatCtx->oformat->flags & AVFMT_GLOBALHEADER)
+                {
+                    aacEncCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+                }
+
+                if (avcodec_open2(aacEncCtx, aacEncoder, nullptr) >= 0)
+                {
+                    avcodec_parameters_from_context(outAudioStream->codecpar, aacEncCtx);
+                }
+                else
+                {
+                    avcodec_free_context(&aacEncCtx);
+                    aacEncCtx = nullptr;
+                }
+            }
+        }
+    }
+
     if (avformat_write_header(outFormatCtx, nullptr) < 0)
     {
         if (outFormatCtx->pb) avio_closep(&outFormatCtx->pb);
+        if (aacEncCtx) avcodec_free_context(&aacEncCtx);
         avcodec_free_context(&encCtx);
         avformat_free_context(outFormatCtx);
         if (callback) callback(0.0f, true, -7);
@@ -378,6 +554,56 @@ void FFmpegEncoder::ExportWorker(
         decoder->Seek(0);
     }
 
+    AVFrame* aacFrame = nullptr;
+    AVPacket* aacPacket = nullptr;
+    int64_t audioFrameIdx = 0;
+    int64_t totalAudioFrames = (totalAudioSamples + 1023) / 1024;
+
+    if (aacEncCtx && outAudioStream)
+    {
+        aacFrame = av_frame_alloc();
+        aacFrame->nb_samples = 1024;
+        aacFrame->format = AV_SAMPLE_FMT_FLTP;
+        av_channel_layout_default(&aacFrame->ch_layout, 2);
+        aacFrame->sample_rate = 44100;
+        av_frame_get_buffer(aacFrame, 0);
+
+        aacPacket = av_packet_alloc();
+    }
+
+    auto writeAudioFrame = [&](int64_t fIdx) {
+        if (!aacEncCtx || !outAudioStream || !aacFrame || !aacPacket) return;
+        int64_t sampleStart = fIdx * 1024;
+        av_frame_make_writable(aacFrame);
+        float* dstL = reinterpret_cast<float*>(aacFrame->data[0]);
+        float* dstR = reinterpret_cast<float*>(aacFrame->data[1]);
+        for (int s = 0; s < 1024; ++s)
+        {
+            int64_t srcIdx = sampleStart + s;
+            if (srcIdx < totalAudioSamples)
+            {
+                dstL[s] = pcmL[srcIdx];
+                dstR[s] = pcmR[srcIdx];
+            }
+            else
+            {
+                dstL[s] = 0.0f;
+                dstR[s] = 0.0f;
+            }
+        }
+        aacFrame->pts = sampleStart;
+        if (avcodec_send_frame(aacEncCtx, aacFrame) >= 0)
+        {
+            while (avcodec_receive_packet(aacEncCtx, aacPacket) >= 0)
+            {
+                av_packet_rescale_ts(aacPacket, aacEncCtx->time_base, outAudioStream->time_base);
+                aacPacket->stream_index = outAudioStream->index;
+                av_interleaved_write_frame(outFormatCtx, aacPacket);
+                av_packet_unref(aacPacket);
+            }
+        }
+    };
+
     for (int64_t i = 0; i < totalFrames; ++i)
     {
         if (m_cancelRequested.load())
@@ -386,6 +612,20 @@ void FFmpegEncoder::ExportWorker(
         }
 
         int64_t ptsMs = (i * 1000) / fps;
+
+        // Interleave audio frames up to current video timestamp
+        while (audioFrameIdx < totalAudioFrames)
+        {
+            int64_t audioPtsMs = (audioFrameIdx * 1024 * 1000) / 44100;
+            if (audioPtsMs <= ptsMs + 50)
+            {
+                writeAudioFrame(audioFrameIdx++);
+            }
+            else
+            {
+                break;
+            }
+        }
 
         // 1. Decode video frame at current timestamp
         if (!videoClips.empty())
@@ -558,7 +798,29 @@ void FFmpegEncoder::ExportWorker(
         av_packet_unref(encPacket);
     }
 
+    // Finish any remaining audio frames
+    while (audioFrameIdx < totalAudioFrames)
+    {
+        writeAudioFrame(audioFrameIdx++);
+    }
+
+    if (aacEncCtx && outAudioStream && aacPacket)
+    {
+        avcodec_send_frame(aacEncCtx, nullptr);
+        while (avcodec_receive_packet(aacEncCtx, aacPacket) >= 0)
+        {
+            av_packet_rescale_ts(aacPacket, aacEncCtx->time_base, outAudioStream->time_base);
+            aacPacket->stream_index = outAudioStream->index;
+            av_interleaved_write_frame(outFormatCtx, aacPacket);
+            av_packet_unref(aacPacket);
+        }
+    }
+
     av_write_trailer(outFormatCtx);
+
+    if (aacFrame) av_frame_free(&aacFrame);
+    if (aacPacket) av_packet_free(&aacPacket);
+    if (aacEncCtx) avcodec_free_context(&aacEncCtx);
 
     av_packet_free(&encPacket);
     av_frame_free(&encFrame);

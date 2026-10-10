@@ -30,7 +30,9 @@ extern "C" {
 #include <libavutil/hwcontext_d3d11va.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 }
 
 class FFmpegEncoder
@@ -45,6 +47,7 @@ public:
         SkiaRenderer* skiaRenderer,
         FFmpegDecoder* decoder,
         const std::vector<VideoClipDesc>& videoClips,
+        const std::vector<VideoClipDesc>& audioClips,
         const std::vector<PrimitiveElementDesc>& elements,
         const ExportConfig& config,
         ExportProgressCallback callback,
@@ -61,6 +64,7 @@ private:
         SkiaRenderer* skiaRenderer,
         FFmpegDecoder* decoder,
         std::vector<VideoClipDesc> videoClips,
+        std::vector<VideoClipDesc> audioClips,
         std::vector<PrimitiveElementDesc> elements,
         ExportConfig config,
         ExportProgressCallback callback,

@@ -28,6 +28,18 @@ namespace WinUIVideoEditor.Native
         public static extern void Engine_AddVideoClip(IntPtr engine, string filePath, long startTimeMs, long durationMs);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        public static extern void Engine_ClearAudioClips(IntPtr engine);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        public static extern void Engine_AddAudioClip(IntPtr engine, string filePath, long startTimeMs, long durationMs);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        public static extern int Engine_ExtractAudioWaveform(string filePath, [Out] float[] outSamples, int maxSamples);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+        public static extern long Engine_GetAudioDurationMs(string filePath);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
         public static extern void Engine_Seek(IntPtr engine, long timeStampMs);
 
         [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]

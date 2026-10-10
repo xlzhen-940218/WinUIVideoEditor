@@ -44,6 +44,7 @@ public:
     bool Seek(int64_t timeStampMs);
 
     bool IsLoaded() const { return m_formatCtx != nullptr && m_videoStreamIdx >= 0; }
+    bool HasCachedFrame() const { return m_hasCachedFrame; }
     int64_t GetDurationMs() const { return m_durationMs; }
     int64_t GetCurrentPositionMs() const { return m_currentPosMs; }
     int GetWidth() const { return m_width; }

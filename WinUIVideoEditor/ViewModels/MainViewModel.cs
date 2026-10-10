@@ -54,6 +54,7 @@ namespace WinUIVideoEditor.ViewModels
                     OnPropertyChanged(nameof(HasSelectedClip));
                     OnPropertyChanged(nameof(IsTextSelected));
                     OnPropertyChanged(nameof(IsShapeSelected));
+                    OnPropertyChanged(nameof(IsAudioSelected));
                     if (_engine != IntPtr.Zero)
                     {
                         NativeEngineApi.Engine_RenderFrame(_engine);
@@ -63,8 +64,9 @@ namespace WinUIVideoEditor.ViewModels
         }
 
         public bool HasSelectedClip => _selectedClip != null;
-        public bool IsTextSelected => _selectedClip?.ElementType == 0;
-        public bool IsShapeSelected => _selectedClip != null && _selectedClip.ElementType >= 1 && _selectedClip.ElementType <= 7;
+        public bool IsTextSelected => _selectedClip != null && _selectedClip.TrackType == TrackType.Text;
+        public bool IsShapeSelected => _selectedClip != null && _selectedClip.TrackType == TrackType.Shape;
+        public bool IsAudioSelected => _selectedClip != null && _selectedClip.TrackType == TrackType.Audio;
 
         public bool IsPlaying
         {
@@ -90,17 +92,21 @@ namespace WinUIVideoEditor.ViewModels
         public void SetEngine(IntPtr engine)
         {
             _engine = engine;
-            if (_engine != IntPtr.Zero)
+            if (_engine == IntPtr.Zero)
             {
-                LoadDirectWriteFonts();
+                _playbackTimer?.Stop();
+                IsPlaying = false;
+                return;
             }
+            LoadDirectWriteFonts();
         }
 
         private void InitializeTracks()
         {
             _timeline.Tracks.Add(new TrackModel { Id = 1, Name = "视频主轨", TrackType = TrackType.Video, Icon = "Video" });
-            _timeline.Tracks.Add(new TrackModel { Id = 2, Name = "文字字幕轨", TrackType = TrackType.Text, Icon = "Font" });
-            _timeline.Tracks.Add(new TrackModel { Id = 3, Name = "图形覆层轨", TrackType = TrackType.Shape, Icon = "Shapes" });
+            _timeline.Tracks.Add(new TrackModel { Id = 2, Name = "音频轨道", TrackType = TrackType.Audio, Icon = "Audio" });
+            _timeline.Tracks.Add(new TrackModel { Id = 3, Name = "文字字幕轨", TrackType = TrackType.Text, Icon = "Font" });
+            _timeline.Tracks.Add(new TrackModel { Id = 4, Name = "图形覆层轨", TrackType = TrackType.Shape, Icon = "Shapes" });
         }
 
         private void PopulateDefaultFonts()
@@ -150,7 +156,15 @@ namespace WinUIVideoEditor.ViewModels
 
         public bool LoadMedia(string filePath)
         {
-            if (_engine == IntPtr.Zero || string.IsNullOrEmpty(filePath)) return false;
+            if (string.IsNullOrEmpty(filePath)) return false;
+
+            string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+            if (ext == ".mp3" || ext == ".wav" || ext == ".aac" || ext == ".flac" || ext == ".m4a" || ext == ".ogg" || ext == ".wma")
+            {
+                return LoadAudio(filePath);
+            }
+
+            if (_engine == IntPtr.Zero) return false;
 
             bool success = NativeEngineApi.Engine_LoadMedia(_engine, filePath);
             if (success)
@@ -159,11 +173,13 @@ namespace WinUIVideoEditor.ViewModels
                 long dur = NativeEngineApi.Engine_GetLoadedMediaDurationMs(_engine);
                 if (dur <= 0) dur = 10000;
 
+                long clipStartMs = 0;
                 var videoTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video);
                 if (videoTrack != null)
                 {
                     if (videoTrack.Clips.Count == 0)
                     {
+                        clipStartMs = 0;
                         var videoClip = new ClipModel
                         {
                             Id = _nextElementId++,
@@ -179,21 +195,48 @@ namespace WinUIVideoEditor.ViewModels
                     }
                     else
                     {
-                        long startMs = _timeline.TotalDurationMs;
+                        clipStartMs = _timeline.TotalDurationMs;
                         var videoClip = new ClipModel
                         {
                             Id = _nextElementId++,
                             Title = System.IO.Path.GetFileName(filePath),
                             TrackType = TrackType.Video,
-                            StartTimeMs = startMs,
+                            StartTimeMs = clipStartMs,
                             DurationMs = dur,
                             ContentText = filePath
                         };
                         videoTrack.Clips.Add(videoClip);
-                        _timeline.TotalDurationMs = startMs + dur;
+                        _timeline.TotalDurationMs = clipStartMs + dur;
                     }
 
                     SyncVideoClipsToEngine();
+                }
+
+                // Extract audio waveform and add audio clip to Audio Track
+                float[] waveform = new float[500];
+                int sampleCount = NativeEngineApi.Engine_ExtractAudioWaveform(filePath, waveform, waveform.Length);
+                float[]? finalWaveform = null;
+                if (sampleCount > 0)
+                {
+                    finalWaveform = new float[sampleCount];
+                    Array.Copy(waveform, finalWaveform, sampleCount);
+                }
+
+                var audioTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Audio);
+                if (audioTrack != null)
+                {
+                    var audioClip = new ClipModel
+                    {
+                        Id = _nextElementId++,
+                        Title = System.IO.Path.GetFileName(filePath) + " (音频)",
+                        TrackType = TrackType.Audio,
+                        StartTimeMs = clipStartMs,
+                        DurationMs = dur,
+                        ContentText = filePath,
+                        WaveformData = finalWaveform
+                    };
+                    audioTrack.Clips.Add(audioClip);
+                    SyncAudioClipsToEngine();
                 }
 
                 // Show first frame immediately without having to click play
@@ -201,6 +244,49 @@ namespace WinUIVideoEditor.ViewModels
                 NativeEngineApi.Engine_RenderFrame(_engine);
             }
             return success;
+        }
+
+        public bool LoadAudio(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return false;
+
+            long dur = NativeEngineApi.Engine_GetAudioDurationMs(filePath);
+            if (dur <= 0) dur = 10000;
+
+            float[] waveform = new float[500];
+            int sampleCount = NativeEngineApi.Engine_ExtractAudioWaveform(filePath, waveform, waveform.Length);
+            float[]? finalWaveform = null;
+            if (sampleCount > 0)
+            {
+                finalWaveform = new float[sampleCount];
+                Array.Copy(waveform, finalWaveform, sampleCount);
+            }
+
+            var audioTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Audio);
+            if (audioTrack != null)
+            {
+                long startMs = audioTrack.Clips.Count == 0 ? 0 : audioTrack.Clips.Max(c => c.EndTimeMs);
+                var audioClip = new ClipModel
+                {
+                    Id = _nextElementId++,
+                    Title = System.IO.Path.GetFileName(filePath),
+                    TrackType = TrackType.Audio,
+                    StartTimeMs = startMs,
+                    DurationMs = dur,
+                    ContentText = filePath,
+                    WaveformData = finalWaveform
+                };
+                audioTrack.Clips.Add(audioClip);
+
+                if (audioClip.EndTimeMs > _timeline.TotalDurationMs)
+                {
+                    _timeline.TotalDurationMs = audioClip.EndTimeMs;
+                }
+
+                SyncAudioClipsToEngine();
+                return true;
+            }
+            return false;
         }
 
         public void SyncVideoClipsToEngine()
@@ -213,6 +299,20 @@ namespace WinUIVideoEditor.ViewModels
                 foreach (var clip in videoTrack.Clips)
                 {
                     NativeEngineApi.Engine_AddVideoClip(_engine, clip.ContentText, clip.StartTimeMs, clip.DurationMs);
+                }
+            }
+        }
+
+        public void SyncAudioClipsToEngine()
+        {
+            if (_engine == IntPtr.Zero) return;
+            NativeEngineApi.Engine_ClearAudioClips(_engine);
+            var audioTrack = _timeline.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Audio);
+            if (audioTrack != null)
+            {
+                foreach (var clip in audioTrack.Clips)
+                {
+                    NativeEngineApi.Engine_AddAudioClip(_engine, clip.ContentText, clip.StartTimeMs, clip.DurationMs);
                 }
             }
         }
@@ -481,11 +581,19 @@ namespace WinUIVideoEditor.ViewModels
                 if (track.Clips.Contains(clipToDelete))
                 {
                     track.Clips.Remove(clipToDelete);
+                    if (track.TrackType == TrackType.Video)
+                    {
+                        SyncVideoClipsToEngine();
+                    }
+                    else if (track.TrackType == TrackType.Audio)
+                    {
+                        SyncAudioClipsToEngine();
+                    }
                     break;
                 }
             }
 
-            if (_engine != IntPtr.Zero)
+            if (_engine != IntPtr.Zero && clipToDelete.TrackType != TrackType.Video && clipToDelete.TrackType != TrackType.Audio)
             {
                 NativeEngineApi.Engine_RemoveElement(_engine, clipToDelete.Id);
                 NativeEngineApi.Engine_RenderFrame(_engine);
@@ -495,11 +603,18 @@ namespace WinUIVideoEditor.ViewModels
             OnPropertyChanged(nameof(HasSelectedClip));
             OnPropertyChanged(nameof(IsTextSelected));
             OnPropertyChanged(nameof(IsShapeSelected));
+            OnPropertyChanged(nameof(IsAudioSelected));
         }
 
         public void SyncClipToEngine(ClipModel clip)
         {
             if (_engine == IntPtr.Zero || clip.TrackType == TrackType.Video) return;
+
+            if (clip.TrackType == TrackType.Audio)
+            {
+                SyncAudioClipsToEngine();
+                return;
+            }
 
             var desc = clip.ToNativeDesc();
             NativeEngineApi.Engine_UpsertElement(_engine, ref desc);

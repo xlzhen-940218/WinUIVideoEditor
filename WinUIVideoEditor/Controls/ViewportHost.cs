@@ -107,6 +107,11 @@ namespace WinUIVideoEditor.Controls
         private float _initialWidth;
         private float _initialHeight;
 
+        private int _lastPhysicalX = -1;
+        private int _lastPhysicalY = -1;
+        private int _lastPhysicalW = -1;
+        private int _lastPhysicalH = -1;
+
         public IntPtr EngineHandle => _engine;
 
         public event Action<IntPtr>? EngineInitialized;
@@ -116,6 +121,12 @@ namespace WinUIVideoEditor.Controls
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
             SizeChanged += OnSizeChanged;
+            LayoutUpdated += OnLayoutUpdated;
+        }
+
+        private void OnLayoutUpdated(object? sender, object e)
+        {
+            UpdateChildWindowPosition();
         }
 
         public void BindViewModel(ViewModels.MainViewModel viewModel)
@@ -156,6 +167,11 @@ namespace WinUIVideoEditor.Controls
             {
                 UpdateChildWindowPosition();
             }
+
+            DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                UpdateChildWindowPosition();
+            });
         }
 
         private void InitializeChildWindow()
@@ -447,22 +463,56 @@ namespace WinUIVideoEditor.Controls
             try
             {
                 double scale = GetDpiScale();
-                GeneralTransform transform;
+                Windows.Foundation.Point point = new Windows.Foundation.Point(0, 0);
+                bool gotTransform = false;
+
                 if (this.XamlRoot?.Content != null)
                 {
-                    transform = TransformToVisual(this.XamlRoot.Content);
-                }
-                else
-                {
-                    transform = TransformToVisual(null);
+                    try
+                    {
+                        var transform = TransformToVisual(this.XamlRoot.Content);
+                        point = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+                        gotTransform = true;
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            var transform = TransformToVisual(null);
+                            point = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+                            gotTransform = true;
+                        }
+                        catch
+                        {
+                            // May fail during initial layout pass
+                        }
+                    }
                 }
 
-                Windows.Foundation.Point point = transform.TransformPoint(new Windows.Foundation.Point(0, 0));
+                if (!gotTransform)
+                {
+                    DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                    {
+                        UpdateChildWindowPosition();
+                    });
+                    return;
+                }
 
                 int physicalX = (int)Math.Round(point.X * scale);
                 int physicalY = (int)Math.Round(point.Y * scale);
-                int physicalW = (int)Math.Max(1, Math.Round(ActualWidth * scale));
-                int physicalH = (int)Math.Max(1, Math.Round(ActualHeight * scale));
+                int physicalW = (int)Math.Max(100, Math.Round(ActualWidth * scale));
+                int physicalH = (int)Math.Max(100, Math.Round(ActualHeight * scale));
+
+                if (physicalX == _lastPhysicalX && physicalY == _lastPhysicalY &&
+                    physicalW == _lastPhysicalW && physicalH == _lastPhysicalH)
+                {
+                    return;
+                }
+
+                _lastPhysicalX = physicalX;
+                _lastPhysicalY = physicalY;
+                _lastPhysicalW = physicalW;
+                _lastPhysicalH = physicalH;
 
                 SetWindowPos(
                     _childHwnd,
@@ -476,20 +526,30 @@ namespace WinUIVideoEditor.Controls
                 if (_engine != IntPtr.Zero)
                 {
                     NativeEngineApi.Engine_Resize(_engine, physicalW, physicalH);
+                    NativeEngineApi.Engine_RenderFrame(_engine);
                 }
             }
             catch
             {
-                // Ignore transient layout exceptions during window minimize/restore
+                DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    UpdateChildWindowPosition();
+                });
             }
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
+            if (_viewModel != null)
+            {
+                _viewModel.SetEngine(IntPtr.Zero);
+            }
+
             if (_engine != IntPtr.Zero)
             {
-                NativeEngineApi.Engine_Destroy(_engine);
+                IntPtr eng = _engine;
                 _engine = IntPtr.Zero;
+                NativeEngineApi.Engine_Destroy(eng);
             }
 
             if (_childHwnd != IntPtr.Zero)

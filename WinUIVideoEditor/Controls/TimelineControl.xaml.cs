@@ -67,16 +67,22 @@ namespace WinUIVideoEditor.Controls
 
             double pps = _viewModel.Timeline.PixelsPerSecond;
             double totalSecs = _viewModel.Timeline.TotalDurationMs / 1000.0;
-            double totalWidth = Math.Max(ActualWidth, totalSecs * pps + 200);
+            double viewportWidth = Math.Max(TracksScrollViewer.ActualWidth, RulerScrollViewer.ActualWidth);
+            if (viewportWidth <= 0)
+            {
+                viewportWidth = Math.Max(200, ActualWidth - 180);
+            }
+            double totalWidth = Math.Max(viewportWidth, totalSecs * pps + 200);
 
             RulerGrid.Width = totalWidth;
             RulerCanvas.Width = totalWidth;
             TracksGrid.Width = totalWidth;
             VideoTrackCanvas.Width = totalWidth;
+            AudioTrackCanvas.Width = totalWidth;
             TextTrackCanvas.Width = totalWidth;
             ShapeTrackCanvas.Width = totalWidth;
 
-            PlayheadLine.Height = TracksGrid.ActualHeight > 0 ? TracksGrid.ActualHeight : 160;
+            PlayheadLine.Height = TracksGrid.ActualHeight > 0 ? TracksGrid.ActualHeight : 210;
 
             RedrawRuler(totalWidth, pps);
             RedrawClips();
@@ -127,6 +133,7 @@ namespace WinUIVideoEditor.Controls
             if (_viewModel == null) return;
 
             VideoTrackCanvas.Children.Clear();
+            AudioTrackCanvas.Children.Clear();
             TextTrackCanvas.Children.Clear();
             ShapeTrackCanvas.Children.Clear();
 
@@ -137,6 +144,7 @@ namespace WinUIVideoEditor.Controls
                 Canvas targetCanvas = track.TrackType switch
                 {
                     TrackType.Video => VideoTrackCanvas,
+                    TrackType.Audio => AudioTrackCanvas,
                     TrackType.Text => TextTrackCanvas,
                     TrackType.Shape => ShapeTrackCanvas,
                     _ => VideoTrackCanvas
@@ -181,6 +189,19 @@ namespace WinUIVideoEditor.Controls
                     }
                 };
             }
+            else if (clip.TrackType == TrackType.Audio)
+            {
+                border.Background = new LinearGradientBrush
+                {
+                    StartPoint = new Point(0, 0),
+                    EndPoint = new Point(1, 1),
+                    GradientStops =
+                    {
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(255, 14, 52, 42), Offset = 0 },
+                        new GradientStop { Color = Windows.UI.Color.FromArgb(255, 22, 82, 66), Offset = 1 }
+                    }
+                };
+            }
             else if (clip.TrackType == TrackType.Text)
             {
                 border.Background = new LinearGradientBrush
@@ -208,14 +229,69 @@ namespace WinUIVideoEditor.Controls
                 };
             }
 
-            var grid = new Grid { Padding = new Thickness(8, 4, 8, 4) };
+            var grid = new Grid { Padding = new Thickness(0, 0, 0, 0) };
+
+            if (clip.TrackType == TrackType.Audio)
+            {
+                var waveformCanvas = new Canvas
+                {
+                    Width = width,
+                    Height = 40,
+                    IsHitTestVisible = false
+                };
+
+                if (clip.WaveformData != null && clip.WaveformData.Length > 0)
+                {
+                    int barSpacing = 3;
+                    int numBars = Math.Max(1, (int)(width / barSpacing));
+                    for (int i = 0; i < numBars; ++i)
+                    {
+                        int sampleIdx = (int)((double)i / numBars * clip.WaveformData.Length);
+                        if (sampleIdx >= clip.WaveformData.Length) sampleIdx = clip.WaveformData.Length - 1;
+                        float amp = clip.WaveformData[sampleIdx];
+                        double barH = Math.Max(2.0, amp * 30.0);
+                        double barY = 20.0 - barH / 2.0;
+
+                        var bar = new Rectangle
+                        {
+                            Width = 2,
+                            Height = barH,
+                            RadiusX = 1,
+                            RadiusY = 1,
+                            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(190, 0, 230, 118)),
+                            IsHitTestVisible = false
+                        };
+                        Canvas.SetLeft(bar, i * barSpacing + 1);
+                        Canvas.SetTop(bar, barY);
+                        waveformCanvas.Children.Add(bar);
+                    }
+                }
+                else
+                {
+                    var centerLine = new Line
+                    {
+                        X1 = 0,
+                        Y1 = 20,
+                        X2 = width,
+                        Y2 = 20,
+                        Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 0, 230, 118)),
+                        StrokeThickness = 1.5,
+                        IsHitTestVisible = false
+                    };
+                    waveformCanvas.Children.Add(centerLine);
+                }
+
+                grid.Children.Add(waveformCanvas);
+            }
+
             var tb = new TextBlock
             {
                 Text = clip.Title,
                 FontSize = 11,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
-                VerticalAlignment = VerticalAlignment.Center,
+                VerticalAlignment = clip.TrackType == TrackType.Audio ? VerticalAlignment.Top : VerticalAlignment.Center,
+                Margin = new Thickness(8, clip.TrackType == TrackType.Audio ? 3 : 0, 8, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
             grid.Children.Add(tb);
@@ -297,6 +373,10 @@ namespace WinUIVideoEditor.Controls
                     {
                         isResizingDuration = false;
                         rightGrip.ReleasePointerCapture(e.Pointer);
+                        if (clip.TrackType == TrackType.Audio)
+                        {
+                            RedrawClips();
+                        }
                         e.Handled = true;
                     }
                 };
@@ -383,6 +463,7 @@ namespace WinUIVideoEditor.Controls
             }
 
             HighlightCanvas(VideoTrackCanvas);
+            HighlightCanvas(AudioTrackCanvas);
             HighlightCanvas(TextTrackCanvas);
             HighlightCanvas(ShapeTrackCanvas);
         }

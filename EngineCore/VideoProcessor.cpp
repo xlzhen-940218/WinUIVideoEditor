@@ -58,12 +58,17 @@ bool VideoColorConverter::InitVideoProcessor(int width, int height)
     hr = m_context.As(&m_videoContext);
     if (FAILED(hr)) return false;
 
+    int maxW = (std::max)(width, 4096);
+    int maxH = (std::max)(height, 4096);
+    m_vpWidth = maxW;
+    m_vpHeight = maxH;
+
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc = {};
     desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    desc.InputWidth = width;
-    desc.InputHeight = height;
-    desc.OutputWidth = width;
-    desc.OutputHeight = height;
+    desc.InputWidth = maxW;
+    desc.InputHeight = maxH;
+    desc.OutputWidth = maxW;
+    desc.OutputHeight = maxH;
     desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
 
     hr = m_videoDevice->CreateVideoProcessorEnumerator(&desc, &m_vpEnumerator);
@@ -279,6 +284,8 @@ bool VideoColorConverter::BlitRGBA8(
 
     ID3D11ShaderResourceView* nullSrvs[1] = { nullptr };
     m_context->PSSetShaderResources(0, 1, nullSrvs);
+    ID3D11RenderTargetView* nullRtv[1] = { nullptr };
+    m_context->OMSetRenderTargets(1, nullRtv, nullptr);
 
     return true;
 }
@@ -322,6 +329,13 @@ bool VideoColorConverter::ConvertNV12ToRGBA8(
     }
 
     // First attempt: Hardware Video Processor
+    int reqW = (std::max)({ 4096, srcWidth, dstWidth });
+    int reqH = (std::max)({ 4096, srcHeight, dstHeight });
+    if (!m_videoProcessor || !m_vpEnumerator || reqW > m_vpWidth || reqH > m_vpHeight)
+    {
+        InitVideoProcessor(reqW, reqH);
+    }
+
     if (m_vpSupported && m_videoProcessor && m_videoContext && m_vpEnumerator)
     {
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc = {};
@@ -407,6 +421,37 @@ bool VideoColorConverter::ConvertNV12ToRGBA8(
         HRESULT hrY = m_device->CreateShaderResourceView(nv12Texture, &srvYDesc, &srvY);
         HRESULT hrUV = m_device->CreateShaderResourceView(nv12Texture, &srvUVDesc, &srvUV);
 
+        if (FAILED(hrY) || FAILED(hrUV))
+        {
+            // Fallback: NV12 texture may lack D3D11_BIND_SHADER_RESOURCE (e.g. D3D11_BIND_DECODER only).
+            // Copy subresource to a temporary NV12 texture with D3D11_BIND_SHADER_RESOURCE.
+            D3D11_TEXTURE2D_DESC copyDesc = {};
+            copyDesc.Width = texDesc.Width;
+            copyDesc.Height = texDesc.Height;
+            copyDesc.MipLevels = 1;
+            copyDesc.ArraySize = 1;
+            copyDesc.Format = DXGI_FORMAT_NV12;
+            copyDesc.SampleDesc.Count = 1;
+            copyDesc.Usage = D3D11_USAGE_DEFAULT;
+            copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> srvTexture;
+            if (SUCCEEDED(m_device->CreateTexture2D(&copyDesc, nullptr, &srvTexture)))
+            {
+                m_context->CopySubresourceRegion(srvTexture.Get(), 0, 0, 0, 0, nv12Texture, subresource, nullptr);
+
+                srvYDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                srvYDesc.Texture2D.MipLevels = 1;
+                srvYDesc.Texture2D.MostDetailedMip = 0;
+                srvUVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                srvUVDesc.Texture2D.MipLevels = 1;
+                srvUVDesc.Texture2D.MostDetailedMip = 0;
+
+                hrY = m_device->CreateShaderResourceView(srvTexture.Get(), &srvYDesc, &srvY);
+                hrUV = m_device->CreateShaderResourceView(srvTexture.Get(), &srvUVDesc, &srvUV);
+            }
+        }
+
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
         HRESULT hrRtv = m_device->CreateRenderTargetView(rgba8Texture, nullptr, &rtv);
 
@@ -439,6 +484,8 @@ bool VideoColorConverter::ConvertNV12ToRGBA8(
             // Unbind
             ID3D11ShaderResourceView* nullSrvs[2] = { nullptr, nullptr };
             m_context->PSSetShaderResources(0, 2, nullSrvs);
+            ID3D11RenderTargetView* nullRtv[1] = { nullptr };
+            m_context->OMSetRenderTargets(1, nullRtv, nullptr);
 
             return true;
         }

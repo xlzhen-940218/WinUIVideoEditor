@@ -4,6 +4,7 @@
 #include "SkiaRenderer.h"
 #include "FFmpegDecoder.h"
 #include "FFmpegEncoder.h"
+#include "AudioPlayer.h"
 
 #include <map>
 #include <vector>
@@ -12,6 +13,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <algorithm>
 
 struct EngineContext
 {
@@ -24,6 +26,8 @@ struct EngineContext
     std::unique_ptr<SkiaRenderer> skiaRenderer;
     std::unique_ptr<FFmpegDecoder> decoder;
     std::unique_ptr<FFmpegEncoder> encoder;
+    std::unique_ptr<AudioPlayer> audioPlayer;
+    std::atomic<bool> audioDirty{ true };
 
     std::map<int, PrimitiveElementDesc> elements;
     std::mutex elementsLock;
@@ -32,6 +36,9 @@ struct EngineContext
     std::vector<VideoClipDesc> videoClips;
     std::mutex videoClipsLock;
     int currentClipIndex = -1;
+
+    std::vector<VideoClipDesc> audioClips;
+    std::mutex audioClipsLock;
 
     std::atomic<bool> isPlaying{ false };
     std::atomic<bool> stopPlaybackLoop{ false };
@@ -66,6 +73,7 @@ struct EngineContext
             {
                 currentPlaybackPosMs = totalDur;
                 isPlaying.store(false);
+                if (audioPlayer) audioPlayer->Pause();
             }
         }
 
@@ -94,7 +102,10 @@ struct EngineContext
                     {
                         decoder->OpenFile(clip.FilePath);
                         currentClipIndex = targetIdx;
-                        decoder->Seek(localOffset);
+                        if (localOffset > 50)
+                        {
+                            decoder->Seek(localOffset);
+                        }
                     }
                     else if (isPlaying.load())
                     {
@@ -125,6 +136,7 @@ struct EngineContext
                     if (isPlaying.load())
                     {
                         isPlaying.store(false);
+                        if (audioPlayer) audioPlayer->Pause();
                     }
                 }
             }
@@ -201,6 +213,7 @@ ENGINE_API void* Engine_Initialize(HWND hWnd, int width, int height)
     ctx->decoder->Initialize(ctx->renderer->GetDevice(), ctx->colorConverter.get());
 
     ctx->encoder = std::make_unique<FFmpegEncoder>();
+    ctx->audioPlayer = std::make_unique<AudioPlayer>();
 
     // Start background playback thread
     ctx->playbackThread = std::thread([ctx]() {
@@ -250,20 +263,54 @@ ENGINE_API void Engine_Destroy(void* engine)
     auto ctx = static_cast<EngineContext*>(engine);
     if (!ctx) return;
 
+    // 1. Stop playback thread and join
     ctx->stopPlaybackLoop.store(true);
     if (ctx->playbackThread.joinable())
     {
         ctx->playbackThread.join();
     }
 
-    std::lock_guard<std::recursive_mutex> lock(ctx->renderLock);
+    // 2. Stop and destroy audio player (stops playback thread and joins it)
+    if (ctx->audioPlayer)
+    {
+        ctx->audioPlayer->Stop();
+        ctx->audioPlayer.reset();
+    }
 
-    if (ctx->encoder) ctx->encoder->CancelExport();
-    if (ctx->decoder) ctx->decoder->Cleanup();
-    if (ctx->skiaRenderer) ctx->skiaRenderer->Cleanup();
-    if (ctx->colorConverter) ctx->colorConverter->Cleanup();
-    if (ctx->renderer) ctx->renderer->Cleanup();
+    // 3. Cancel and destroy encoder (cancels export and joins worker thread)
+    if (ctx->encoder)
+    {
+        ctx->encoder->CancelExport();
+        ctx->encoder.reset();
+    }
 
+    // 4. Clean up and destroy decoder and renderers under renderLock
+    {
+        std::lock_guard<std::recursive_mutex> lock(ctx->renderLock);
+
+        if (ctx->decoder)
+        {
+            ctx->decoder->Cleanup();
+            ctx->decoder.reset();
+        }
+        if (ctx->skiaRenderer)
+        {
+            ctx->skiaRenderer->Cleanup();
+            ctx->skiaRenderer.reset();
+        }
+        if (ctx->colorConverter)
+        {
+            ctx->colorConverter->Cleanup();
+            ctx->colorConverter.reset();
+        }
+        if (ctx->renderer)
+        {
+            ctx->renderer->Cleanup();
+            ctx->renderer.reset();
+        }
+    }
+
+    // 5. Delete context now that all threads are terminated and all subsystems destroyed
     delete ctx;
 }
 
@@ -276,6 +323,8 @@ ENGINE_API bool Engine_LoadMedia(void* engine, const wchar_t* filePath)
     if (ok)
     {
         ctx->currentPlaybackPosMs = 0;
+        ctx->currentClipIndex = 0;
+        ctx->audioDirty.store(true);
         ctx->RenderSingleFrame();
     }
     return ok;
@@ -288,6 +337,7 @@ ENGINE_API void Engine_ClearVideoClips(void* engine)
     std::lock_guard<std::mutex> lock(ctx->videoClipsLock);
     ctx->videoClips.clear();
     ctx->currentClipIndex = -1;
+    ctx->audioDirty.store(true);
 }
 
 ENGINE_API void Engine_AddVideoClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs)
@@ -300,6 +350,204 @@ ENGINE_API void Engine_AddVideoClip(void* engine, const wchar_t* filePath, int64
     desc.StartTimeMs = startTimeMs;
     desc.DurationMs = durationMs;
     ctx->videoClips.push_back(desc);
+    if (ctx->videoClips.size() == 1 && ctx->decoder && ctx->decoder->IsLoaded())
+    {
+        ctx->currentClipIndex = 0;
+    }
+    ctx->audioDirty.store(true);
+}
+
+ENGINE_API void Engine_ClearAudioClips(void* engine)
+{
+    auto ctx = static_cast<EngineContext*>(engine);
+    if (!ctx) return;
+    std::lock_guard<std::mutex> lock(ctx->audioClipsLock);
+    ctx->audioClips.clear();
+    ctx->audioDirty.store(true);
+}
+
+ENGINE_API void Engine_AddAudioClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs)
+{
+    auto ctx = static_cast<EngineContext*>(engine);
+    if (!ctx || !filePath) return;
+    std::lock_guard<std::mutex> lock(ctx->audioClipsLock);
+    VideoClipDesc desc = {};
+    wcsncpy_s(desc.FilePath, filePath, 259);
+    desc.StartTimeMs = startTimeMs;
+    desc.DurationMs = durationMs;
+    ctx->audioClips.push_back(desc);
+    ctx->audioDirty.store(true);
+}
+
+ENGINE_API int Engine_ExtractAudioWaveform(const wchar_t* filePath, float* outSamples, int maxSamples)
+{
+    if (!filePath || !outSamples || maxSamples <= 0) return 0;
+
+    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, filePath, -1, nullptr, 0, nullptr, nullptr);
+    if (utf8Len <= 0) return 0;
+    std::string utf8Path(utf8Len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, filePath, -1, &utf8Path[0], utf8Len, nullptr, nullptr);
+
+    AVFormatContext* fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, utf8Path.c_str(), nullptr, nullptr) != 0 || !fmtCtx)
+    {
+        return 0;
+    }
+
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0)
+    {
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    const AVCodec* decoder = nullptr;
+    int audioStreamIdx = av_find_best_stream(fmtCtx, AVMEDIA_TYPE_AUDIO, -1, -1, &decoder, 0);
+    if (audioStreamIdx < 0 || !decoder)
+    {
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    AVStream* audioStream = fmtCtx->streams[audioStreamIdx];
+    AVCodecContext* codecCtx = avcodec_alloc_context3(decoder);
+    if (!codecCtx)
+    {
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    if (avcodec_parameters_to_context(codecCtx, audioStream->codecpar) < 0 ||
+        avcodec_open2(codecCtx, decoder, nullptr) < 0)
+    {
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    int64_t durMs = 0;
+    if (audioStream->duration != AV_NOPTS_VALUE && audioStream->time_base.den > 0)
+    {
+        durMs = static_cast<int64_t>(audioStream->duration * av_q2d(audioStream->time_base) * 1000.0);
+    }
+    else if (fmtCtx->duration != AV_NOPTS_VALUE)
+    {
+        durMs = fmtCtx->duration / (AV_TIME_BASE / 1000);
+    }
+    if (durMs <= 0) durMs = 10000;
+
+    SwrContext* swrCtx = nullptr;
+    AVChannelLayout monoLayout;
+    av_channel_layout_default(&monoLayout, 1);
+    swr_alloc_set_opts2(&swrCtx, &monoLayout, AV_SAMPLE_FMT_FLT, 8000,
+                        &codecCtx->ch_layout, codecCtx->sample_fmt, codecCtx->sample_rate,
+                        0, nullptr);
+    if (!swrCtx || swr_init(swrCtx) < 0)
+    {
+        if (swrCtx) swr_free(&swrCtx);
+        avcodec_free_context(&codecCtx);
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    std::vector<float> peaks(maxSamples, 0.05f);
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* pkt = av_packet_alloc();
+
+    float resampleBuffer[4096];
+    uint8_t* outData[1] = { reinterpret_cast<uint8_t*>(resampleBuffer) };
+
+    while (av_read_frame(fmtCtx, pkt) >= 0)
+    {
+        if (pkt->stream_index == audioStreamIdx)
+        {
+            if (avcodec_send_packet(codecCtx, pkt) >= 0)
+            {
+                while (avcodec_receive_frame(codecCtx, frame) >= 0)
+                {
+                    int64_t ptsMs = 0;
+                    if (frame->pts != AV_NOPTS_VALUE && audioStream->time_base.den > 0)
+                    {
+                        ptsMs = static_cast<int64_t>(frame->pts * av_q2d(audioStream->time_base) * 1000.0);
+                    }
+                    int bucket = static_cast<int>((ptsMs * maxSamples) / durMs);
+                    if (bucket >= 0 && bucket < maxSamples)
+                    {
+                        int converted = swr_convert(swrCtx, outData, 4096,
+                            const_cast<const uint8_t**>(frame->data), frame->nb_samples);
+                        float maxAmp = 0.0f;
+                        for (int i = 0; i < converted; ++i)
+                        {
+                            float v = fabsf(resampleBuffer[i]);
+                            if (v > maxAmp) maxAmp = v;
+                        }
+                        if (maxAmp > peaks[bucket])
+                        {
+                            peaks[bucket] = maxAmp;
+                        }
+                    }
+                    av_frame_unref(frame);
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    // Flush decoder
+    avcodec_send_packet(codecCtx, nullptr);
+    while (avcodec_receive_frame(codecCtx, frame) >= 0)
+    {
+        av_frame_unref(frame);
+    }
+
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    swr_free(&swrCtx);
+    avcodec_free_context(&codecCtx);
+    avformat_close_input(&fmtCtx);
+
+    // Normalize peaks
+    float maxVal = 0.01f;
+    for (int i = 0; i < maxSamples; ++i)
+    {
+        if (peaks[i] > maxVal) maxVal = peaks[i];
+    }
+    for (int i = 0; i < maxSamples; ++i)
+    {
+        outSamples[i] = (std::clamp)(peaks[i] / maxVal, 0.05f, 1.0f);
+    }
+
+    return maxSamples;
+}
+
+ENGINE_API int64_t Engine_GetAudioDurationMs(const wchar_t* filePath)
+{
+    if (!filePath) return 0;
+    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, filePath, -1, nullptr, 0, nullptr, nullptr);
+    if (utf8Len <= 0) return 0;
+    std::string utf8Path(utf8Len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, filePath, -1, &utf8Path[0], utf8Len, nullptr, nullptr);
+
+    AVFormatContext* fmtCtx = nullptr;
+    if (avformat_open_input(&fmtCtx, utf8Path.c_str(), nullptr, nullptr) != 0) return 0;
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0)
+    {
+        avformat_close_input(&fmtCtx);
+        return 0;
+    }
+
+    int64_t durMs = 0;
+    const AVCodec* decoder = nullptr;
+    int audioStreamIdx = av_find_best_stream(fmtCtx, AVMEDIA_TYPE_AUDIO, -1, -1, &decoder, 0);
+    if (audioStreamIdx >= 0 && fmtCtx->streams[audioStreamIdx]->duration != AV_NOPTS_VALUE && fmtCtx->streams[audioStreamIdx]->time_base.den > 0)
+    {
+        durMs = static_cast<int64_t>(fmtCtx->streams[audioStreamIdx]->duration * av_q2d(fmtCtx->streams[audioStreamIdx]->time_base) * 1000.0);
+    }
+    else if (fmtCtx->duration > 0 && fmtCtx->duration != AV_NOPTS_VALUE)
+    {
+        durMs = fmtCtx->duration / (AV_TIME_BASE / 1000);
+    }
+    avformat_close_input(&fmtCtx);
+    return durMs;
 }
 
 ENGINE_API void Engine_Seek(void* engine, int64_t timeStampMs)
@@ -337,14 +585,29 @@ ENGINE_API void Engine_Seek(void* engine, int64_t timeStampMs)
                 {
                     ctx->decoder->OpenFile(clip.FilePath);
                     ctx->currentClipIndex = targetIdx;
+                    if (localOffset > 50)
+                    {
+                        ctx->decoder->Seek(localOffset);
+                    }
                 }
-                ctx->decoder->Seek(localOffset);
+                else
+                {
+                    if (localOffset > 50 || ctx->decoder->GetCurrentPositionMs() > 50 || !ctx->decoder->HasCachedFrame())
+                    {
+                        ctx->decoder->Seek(localOffset);
+                    }
+                }
             }
         }
         else if (ctx->decoder)
         {
             ctx->decoder->Seek(ctx->currentPlaybackPosMs);
         }
+    }
+
+    if (ctx->audioPlayer)
+    {
+        ctx->audioPlayer->Seek(ctx->currentPlaybackPosMs);
     }
 
     ctx->RenderSingleFrame();
@@ -359,6 +622,27 @@ ENGINE_API void Engine_Play(void* engine)
     {
         Engine_Seek(engine, 0);
     }
+
+    if (ctx->audioPlayer)
+    {
+        if (ctx->audioDirty.load())
+        {
+            std::vector<VideoClipDesc> effClips;
+            {
+                std::lock_guard<std::mutex> aLock(ctx->audioClipsLock);
+                effClips = ctx->audioClips;
+            }
+            if (effClips.empty())
+            {
+                std::lock_guard<std::mutex> vLock(ctx->videoClipsLock);
+                effClips = ctx->videoClips;
+            }
+            ctx->audioPlayer->LoadClips(effClips, totalDur);
+            ctx->audioDirty.store(false);
+        }
+        ctx->audioPlayer->Play(ctx->currentPlaybackPosMs);
+    }
+
     ctx->isPlaying.store(true);
 }
 
@@ -367,6 +651,10 @@ ENGINE_API void Engine_Pause(void* engine)
     auto ctx = static_cast<EngineContext*>(engine);
     if (!ctx) return;
     ctx->isPlaying.store(false);
+    if (ctx->audioPlayer)
+    {
+        ctx->audioPlayer->Pause();
+    }
 }
 
 ENGINE_API bool Engine_IsPlaying(void* engine)
@@ -497,12 +785,19 @@ ENGINE_API bool Engine_StartExport(
         clips = ctx->videoClips;
     }
 
+    std::vector<VideoClipDesc> audioClips;
+    {
+        std::lock_guard<std::mutex> lock(ctx->audioClipsLock);
+        audioClips = ctx->audioClips;
+    }
+
     return ctx->encoder->StartExport(
         ctx->renderer->GetDevice(),
         ctx->colorConverter.get(),
         ctx->skiaRenderer.get(),
         ctx->decoder.get(),
         clips,
+        audioClips,
         elemList,
         *config,
         callback,

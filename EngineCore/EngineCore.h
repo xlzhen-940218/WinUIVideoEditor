@@ -69,6 +69,10 @@ extern "C" {
     ENGINE_API bool Engine_LoadMedia(void* engine, const wchar_t* filePath);
     ENGINE_API void Engine_ClearVideoClips(void* engine);
     ENGINE_API void Engine_AddVideoClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs);
+    ENGINE_API void Engine_ClearAudioClips(void* engine);
+    ENGINE_API void Engine_AddAudioClip(void* engine, const wchar_t* filePath, int64_t startTimeMs, int64_t durationMs);
+    ENGINE_API int Engine_ExtractAudioWaveform(const wchar_t* filePath, float* outSamples, int maxSamples);
+    ENGINE_API int64_t Engine_GetAudioDurationMs(const wchar_t* filePath);
     ENGINE_API void Engine_Seek(void* engine, int64_t timeStampMs);
     ENGINE_API void Engine_Play(void* engine);
     ENGINE_API void Engine_Pause(void* engine);

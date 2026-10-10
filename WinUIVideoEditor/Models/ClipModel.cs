@@ -9,8 +9,9 @@ namespace WinUIVideoEditor.Models
     public enum TrackType
     {
         Video = 0,
-        Text = 1,
-        Shape = 2
+        Audio = 1,
+        Text = 2,
+        Shape = 3
     }
 
     public class ClipModel : INotifyPropertyChanged
@@ -32,6 +33,7 @@ namespace WinUIVideoEditor.Models
         private string _fontFamily = "Segoe UI";
         private string _contentText = "双击输入文本";
         private bool _isSelected;
+        private float[]? _waveformData;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -145,6 +147,12 @@ namespace WinUIVideoEditor.Models
         {
             get => _isSelected;
             set { if (_isSelected != value) { _isSelected = value; OnPropertyChanged(); } }
+        }
+
+        public float[]? WaveformData
+        {
+            get => _waveformData;
+            set { if (_waveformData != value) { _waveformData = value; OnPropertyChanged(); } }
         }
 
         public NativeEngineApi.PrimitiveElementDesc ToNativeDesc()

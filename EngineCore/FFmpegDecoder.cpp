@@ -366,18 +366,51 @@ bool FFmpegDecoder::Seek(int64_t timeStampMs)
     AVStream* videoStream = m_formatCtx->streams[m_videoStreamIdx];
     int64_t targetPts = static_cast<int64_t>((timeStampMs / 1000.0) / av_q2d(videoStream->time_base));
 
-    int ret = av_seek_frame(m_formatCtx, m_videoStreamIdx, targetPts, AVSEEK_FLAG_BACKWARD);
-    if (ret < 0)
+    // If seeking to 0 and we already have a valid cached frame at the start, don't flush
+    if (timeStampMs <= 0 && m_hasCachedFrame && m_currentPosMs <= 50)
     {
-        ret = av_seek_frame(m_formatCtx, -1, targetPts, AVSEEK_FLAG_BACKWARD);
+        m_currentPosMs = 0;
+        return true;
     }
+
+    int ret = -1;
+    if (timeStampMs <= 0)
+    {
+        ret = av_seek_frame(m_formatCtx, m_videoStreamIdx, 0, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0)
+        {
+            ret = avformat_seek_file(m_formatCtx, m_videoStreamIdx, 0, 0, 0, AVSEEK_FLAG_BACKWARD);
+        }
+        if (ret < 0)
+        {
+            ret = av_seek_frame(m_formatCtx, -1, 0, AVSEEK_FLAG_BACKWARD);
+        }
+    }
+    else
+    {
+        ret = av_seek_frame(m_formatCtx, m_videoStreamIdx, targetPts, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0)
+        {
+            ret = av_seek_frame(m_formatCtx, m_videoStreamIdx, targetPts, 0);
+        }
+        if (ret < 0)
+        {
+            ret = av_seek_frame(m_formatCtx, -1, targetPts, AVSEEK_FLAG_BACKWARD);
+        }
+        if (ret < 0)
+        {
+            ret = av_seek_frame(m_formatCtx, -1, targetPts, 0);
+        }
+    }
+
     if (ret >= 0)
     {
         avcodec_flush_buffers(m_codecCtx);
         m_currentPosMs = timeStampMs;
 
         // Decode frame after seek to immediately update cached frame
-        while (true)
+        int maxAttempts = 150;
+        while (maxAttempts-- > 0)
         {
             int r = avcodec_receive_frame(m_codecCtx, m_frame);
             if (r == 0)

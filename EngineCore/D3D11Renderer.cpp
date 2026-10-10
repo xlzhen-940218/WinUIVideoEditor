@@ -294,6 +294,12 @@ void D3D11Renderer::EndFrame()
 
     if (!m_context || !m_swapChain || !m_backBufferRtv || !m_targetTexture) return;
 
+    // Unbind render targets and SRVs so targetTexture is not bound during copy
+    ID3D11RenderTargetView* nullRtvs[1] = { nullptr };
+    m_context->OMSetRenderTargets(1, nullRtvs, nullptr);
+    ID3D11ShaderResourceView* nullSrvs[4] = { nullptr, nullptr, nullptr, nullptr };
+    m_context->PSSetShaderResources(0, 4, nullSrvs);
+
     // Blit / copy target texture onto back buffer
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
     if (SUCCEEDED(m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))))
@@ -328,6 +334,6 @@ void D3D11Renderer::Present()
     std::lock_guard<std::mutex> lock(m_renderLock);
     if (m_swapChain)
     {
-        m_swapChain->Present(1, 0);
+        m_swapChain->Present(0, 0);
     }
 }

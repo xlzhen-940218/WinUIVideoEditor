@@ -592,6 +592,9 @@ void SkiaRenderer::EndDraw()
 
         ID3D11RenderTargetView* nullRtv[1] = { nullptr };
         context->OMSetRenderTargets(1, nullRtv, nullptr);
+
+        float defaultBlend[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        context->OMSetBlendState(nullptr, defaultBlend, 0xFFFFFFFF);
     }
 
     m_currentTargetTexture = nullptr;

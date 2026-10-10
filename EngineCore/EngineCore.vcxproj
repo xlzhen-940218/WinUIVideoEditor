@@ -68,7 +68,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalLibraryDirectories>$(ProjectDir);$(ProjectDir)ThirdParty\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwrite.lib;windowscodecs.lib;d3dcompiler.lib;libSkiaSharp.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwrite.lib;windowscodecs.lib;d3dcompiler.lib;winmm.lib;libSkiaSharp.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>
@@ -98,7 +98,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalLibraryDirectories>$(ProjectDir);$(ProjectDir)ThirdParty\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwrite.lib;windowscodecs.lib;d3dcompiler.lib;libSkiaSharp.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwrite.lib;windowscodecs.lib;d3dcompiler.lib;winmm.lib;libSkiaSharp.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>
@@ -117,6 +117,7 @@
     <ClInclude Include="SkiaRenderer.h" />
     <ClInclude Include="FFmpegDecoder.h" />
     <ClInclude Include="FFmpegEncoder.h" />
+    <ClInclude Include="AudioPlayer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EngineCore.cpp" />
@@ -125,6 +126,7 @@
     <ClCompile Include="SkiaRenderer.cpp" />
     <ClCompile Include="FFmpegDecoder.cpp" />
     <ClCompile Include="FFmpegEncoder.cpp" />
+    <ClCompile Include="AudioPlayer.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

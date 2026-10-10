@@ -62,7 +62,16 @@
                         </StackPanel>
                     </Grid>
                 </Border>
-                <!-- Track 2: Text -->
+                <!-- Track 2: Audio -->
+                <Border Height="48" Background="#24242C" Padding="12,0" CornerRadius="4" Margin="4,2">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                            <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="#00E676"/>
+                            <TextBlock Text="音频轨道" FontSize="12" FontWeight="SemiBold" Foreground="#E0E0E0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <!-- Track 3: Text -->
                 <Border Height="48" Background="#24242C" Padding="12,0" CornerRadius="4" Margin="4,2">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
@@ -71,7 +80,7 @@
                         </StackPanel>
                     </Grid>
                 </Border>
-                <!-- Track 3: Shape -->
+                <!-- Track 4: Shape -->
                 <Border Height="48" Background="#24242C" Padding="12,0" CornerRadius="4" Margin="4,2">
                     <Grid>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
@@ -87,16 +96,18 @@
         <Border Grid.Row="1" Grid.Column="1" Background="#141418">
             <ScrollViewer x:Name="TracksScrollViewer" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                           ViewChanged="OnTracksScrollViewChanged">
-                <Grid x:Name="TracksGrid" MinWidth="1200" HorizontalAlignment="Left"
+                <Grid x:Name="TracksGrid" HorizontalAlignment="Left"
                       PointerPressed="OnTracksGridPointerPressed">
                     <!-- Tracks Canvas Stack -->
-                    <StackPanel Spacing="2" Padding="0,4">
+                    <StackPanel HorizontalAlignment="Left" Spacing="2" Padding="0,4">
                         <!-- Video Track Row -->
-                        <Canvas x:Name="VideoTrackCanvas" Height="48" Background="#1E1E24" Margin="0,2"/>
+                        <Canvas x:Name="VideoTrackCanvas" Height="48" HorizontalAlignment="Left" Background="#1E1E24" Margin="0,2"/>
+                        <!-- Audio Track Row -->
+                        <Canvas x:Name="AudioTrackCanvas" Height="48" HorizontalAlignment="Left" Background="#1E1E24" Margin="0,2"/>
                         <!-- Text Track Row -->
-                        <Canvas x:Name="TextTrackCanvas" Height="48" Background="#1E1E24" Margin="0,2"/>
+                        <Canvas x:Name="TextTrackCanvas" Height="48" HorizontalAlignment="Left" Background="#1E1E24" Margin="0,2"/>
                         <!-- Shape Track Row -->
-                        <Canvas x:Name="ShapeTrackCanvas" Height="48" Background="#1E1E24" Margin="0,2"/>
+                        <Canvas x:Name="ShapeTrackCanvas" Height="48" HorizontalAlignment="Left" Background="#1E1E24" Margin="0,2"/>
                     </StackPanel>
 
                     <!-- Playhead Vertical Line traversing tracks -->

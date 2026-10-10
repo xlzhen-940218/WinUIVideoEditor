@@ -47,7 +47,7 @@ namespace WinUIVideoEditor.Controls
         private void UpdateBoundingBox()
         {
             var clip = _viewModel?.SelectedClip;
-            if (clip == null || clip.TrackType == TrackType.Video)
+            if (clip == null || clip.TrackType == TrackType.Video || clip.TrackType == TrackType.Audio)
             {
                 BoundingBoxContainer.Visibility = Visibility.Collapsed;
                 return;
@@ -104,7 +104,7 @@ namespace WinUIVideoEditor.Controls
             // Check if clicking on any clip in the timeline
             foreach (var track in _viewModel.Timeline.Tracks)
             {
-                if (track.TrackType == TrackType.Video) continue;
+                if (track.TrackType == TrackType.Video || track.TrackType == TrackType.Audio) continue;
 
                 foreach (var clip in track.Clips)
                 {

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -20,6 +21,7 @@ namespace WinUIVideoEditor
         private readonly MainViewModel _viewModel = new();
         private IntPtr _hwnd = IntPtr.Zero;
         private bool _isUpdatingUiFromModel = false;
+        private readonly SubclassProc _subclassProc;
 
         public MainWindow()
         {
@@ -30,14 +32,20 @@ namespace WinUIVideoEditor
             var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hwnd);
             var appWindow = AppWindow.GetFromWindowId(windowId);
             appWindow.Title = "WinUI 视频剪辑器";
-            appWindow.Resize(new Windows.Graphics.SizeInt32(1440, 900));
+            appWindow.Resize(new Windows.Graphics.SizeInt32(1800, 1200));
+
+            _subclassProc = WindowSubclassProc;
+            SetWindowSubclass(_hwnd, _subclassProc, UIntPtr.Zero, UIntPtr.Zero);
 
             NativeViewport.EngineInitialized += OnEngineInitialized;
             NativeViewport.SetParentHwnd(_hwnd);
 
             this.Activated += (s, e) =>
             {
-                NativeViewport.UpdateChildWindowPosition();
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    NativeViewport.UpdateChildWindowPosition();
+                });
             };
 
             _viewModel.Timeline.PropertyChanged += (s, e) =>
@@ -73,6 +81,14 @@ namespace WinUIVideoEditor
                     DispatcherQueue.TryEnqueue(UpdatePropertyPanelFromSelectedClip);
                 }
             };
+
+            this.Closed += OnWindowClosed;
+        }
+
+        private void OnWindowClosed(object sender, WindowEventArgs args)
+        {
+            _viewModel.Pause();
+            _viewModel.SetEngine(IntPtr.Zero);
         }
 
         private void OnEngineInitialized(IntPtr engine)
@@ -81,6 +97,11 @@ namespace WinUIVideoEditor
             NativeViewport.BindViewModel(_viewModel);
             ViewportOverlay.BindViewModel(_viewModel);
             TimelineView.BindViewModel(_viewModel);
+
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                NativeViewport.UpdateChildWindowPosition();
+            });
 
             CmbFontFamily.ItemsSource = _viewModel.AvailableFonts;
             if (_viewModel.AvailableFonts.Count > 0)
@@ -94,7 +115,7 @@ namespace WinUIVideoEditor
             var clip = _viewModel.SelectedClip;
             _isUpdatingUiFromModel = true;
 
-            if (clip != null && clip.TrackType != TrackType.Video)
+            if (clip != null && clip.TrackType != TrackType.Video && clip.TrackType != TrackType.Audio)
             {
                 if (clip.ElementType == 0) // Text
                 {
@@ -136,12 +157,18 @@ namespace WinUIVideoEditor
             picker.FileTypeFilter.Add(".avi");
             picker.FileTypeFilter.Add(".mov");
             picker.FileTypeFilter.Add(".ts");
+            picker.FileTypeFilter.Add(".mp3");
+            picker.FileTypeFilter.Add(".wav");
+            picker.FileTypeFilter.Add(".aac");
+            picker.FileTypeFilter.Add(".m4a");
+            picker.FileTypeFilter.Add(".flac");
 
             InitializeWithWindow.Initialize(picker, _hwnd);
 
             var file = await picker.PickSingleFileAsync();
             if (file != null)
             {
+                NativeViewport.UpdateChildWindowPosition();
                 bool ok = _viewModel.LoadMedia(file.Path);
                 if (ok)
                 {
@@ -367,6 +394,46 @@ namespace WinUIVideoEditor
         {
             var window = new ProjectSettingsWindow(_hwnd, _viewModel.MediaFilePath, _viewModel.Timeline.TotalDurationFormatted);
             window.Activate();
+        }
+
+        private IntPtr WindowSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
+        {
+            if (uMsg == WM_GETMINMAXINFO)
+            {
+                MINMAXINFO mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+                mmi.ptMinTrackSize.x = 1500;
+                mmi.ptMinTrackSize.y = 900;
+                Marshal.StructureToPtr(mmi, lParam, true);
+                return IntPtr.Zero;
+            }
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        }
+
+        private const uint WM_GETMINMAXINFO = 0x0024;
+
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+        private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT
+        {
+            public int x;
+            public int y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MINMAXINFO
+        {
+            public POINT ptReserved;
+            public POINT ptMaxSize;
+            public POINT ptMaxPosition;
+            public POINT ptMinTrackSize;
+            public POINT ptMaxTrackSize;
         }
     }
 }
